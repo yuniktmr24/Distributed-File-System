@@ -1,10 +1,6 @@
-package dfs.payload;
-
-import dfs.domain.ChunkMetaData;
+package csx55.dfs.payload;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
 
 public class MajorHeartBeat extends HeartBeat implements Serializable {
     private static final long serialVersionUID = 1L;

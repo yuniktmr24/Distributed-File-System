@@ -1,4 +1,4 @@
-package dfs.payload;
+package csx55.dfs.payload;
 
 import java.io.Serializable;
 

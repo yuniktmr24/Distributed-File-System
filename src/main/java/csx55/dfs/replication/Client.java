@@ -1,13 +1,12 @@
-package dfs.replication;
+package csx55.dfs.replication;
 
-import dfs.domain.UserCommands;
+import csx55.dfs.domain.UserCommands;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.UnknownHostException;
 
 public class Client {
     public static void main (String [] args) {

@@ -1,4 +1,4 @@
-package dfs.config;
+package csx55.dfs.config;
 
 import java.util.concurrent.TimeUnit;
 

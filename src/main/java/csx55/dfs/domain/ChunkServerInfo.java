@@ -1,4 +1,4 @@
-package dfs.domain;
+package csx55.dfs.domain;
 
 import java.util.ArrayList;
 import java.util.List;

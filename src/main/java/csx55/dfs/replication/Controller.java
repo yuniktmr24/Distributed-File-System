@@ -1,11 +1,12 @@
-package dfs.replication;
+package csx55.dfs.replication;
 
-import dfs.config.ControllerConfig;
-import dfs.domain.ChunkServerInfo;
-import dfs.domain.Node;
-import dfs.payload.MajorHeartBeat;
-import dfs.payload.MinorHeartBeat;
-import dfs.transport.TCPServerThread;
+import csx55.dfs.config.ControllerConfig;
+import csx55.dfs.domain.ChunkMetaData;
+import csx55.dfs.domain.ChunkServerInfo;
+import csx55.dfs.domain.Node;
+import csx55.dfs.payload.MajorHeartBeat;
+import csx55.dfs.payload.MinorHeartBeat;
+import csx55.dfs.transport.TCPServerThread;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -20,14 +21,49 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class Controller implements Node {
+    /***
+     * These are the maps maintained in the controller to track
+     * various distributed statistics about the chunkServers
+     * and the chunks stored across the cluster
+     * **********
+     * - chunkServerInfoMap -> high level map between node to the high level chunkServer info
+     *   such as node IP, node port, available space, etc
+     * **********
+     * - chunkMetaDataMap -> map between filename to the list of chunk
+     *  metadata gathered from across the chunkServers in the cluster
+     *  ************
+     *  - chunkStorageMap -> map between chunk to the list of chunk severs
+     *  where these chunk replicas are stored. Useful for retrieval, fault tolerance
+     *  ************
+     *  - chunkServerAvailableSpaceMap -> map between chunkServer to
+     *  the available space it contains. this will make it easier to
+     *  rank ChunkServers based on space and then inform the client
+     *  to send their chunks based on this ranking
+     * **********
+     *  - lastHeartbeatReceived -> map between chunkServer and the timestamp
+     *  when we received the last heartbeat (major or minor) from it. this will
+     *  be compared against the HEARTBEAT_TIMEOUT interval to detect disconnected
+     *  chunkServers and initiate fault tolerance / recovery procedures
+     */
+    private static Map <String, ChunkServerInfo> chunkServerInfoMap;
+
+    private static Map <String, List <ChunkMetaData>> chunkMetaDataMap;
+
+    private static Map <String, List <String>> chunkStorageMap;
+
+    private static Map <String, Long> chunkServerAvailableSpaceMap;
+
+    private static Map<String, Long> lastHeartbeatReceived;
+
+    static {
+        chunkServerInfoMap = new ConcurrentHashMap<>();
+        chunkMetaDataMap = new ConcurrentHashMap<>();
+        chunkStorageMap = new ConcurrentHashMap<>();
+        chunkServerAvailableSpaceMap = new ConcurrentHashMap<>();
+        lastHeartbeatReceived = new ConcurrentHashMap<>();
+    }
     private static final Logger logger = Logger.getLogger(Controller.class.getName());
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-
-    private static List<ChunkServerInfo> chunkServerInfo = Collections.synchronizedList(new ArrayList<>());
-    private static Map<String, Long> lastHeartbeatReceived = new ConcurrentHashMap<>();
-
-    private static Map <String, ChunkServerInfo> chunkServerInfoMap = new ConcurrentHashMap<>();
-
     private static final Controller instance = new Controller();
     public static Controller getInstance() {
         return instance;
@@ -67,6 +103,7 @@ public class Controller implements Node {
                 if ((now - lastTime) > ControllerConfig.HEARTBEAT_TIMEOUT) {
                     logger.warning("Heartbeat timeout for server: " + key);
                     // Here you might also want to try reconnecting or marking the server as down.
+                    //TODO fault tolerance. File transfers via data plane
                 }
             });
         }, 1, 1, TimeUnit.MINUTES); // Check every minute

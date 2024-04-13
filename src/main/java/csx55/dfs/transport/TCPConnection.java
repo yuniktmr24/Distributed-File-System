@@ -1,7 +1,7 @@
-package dfs.transport;
+package csx55.dfs.transport;
 
 
-import dfs.domain.Node;
+import csx55.dfs.domain.Node;
 
 import java.io.IOException;
 import java.net.Socket;

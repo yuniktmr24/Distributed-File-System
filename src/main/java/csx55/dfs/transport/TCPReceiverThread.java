@@ -1,13 +1,12 @@
-package dfs.transport;
+package csx55.dfs.transport;
 
 
-import dfs.domain.Node;
-import dfs.payload.HeartBeat;
-import dfs.payload.MajorHeartBeat;
-import dfs.payload.MinorHeartBeat;
-import dfs.replication.ChunkServer;
-import dfs.replication.Client;
-import dfs.replication.Controller;
+import csx55.dfs.replication.Controller;
+import csx55.dfs.domain.Node;
+import csx55.dfs.payload.MajorHeartBeat;
+import csx55.dfs.payload.MinorHeartBeat;
+import csx55.dfs.replication.ChunkServer;
+import csx55.dfs.replication.Client;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

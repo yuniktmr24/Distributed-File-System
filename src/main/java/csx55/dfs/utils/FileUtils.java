@@ -1,6 +1,6 @@
-package dfs.utils;
+package csx55.dfs.utils;
 
-import dfs.config.ChunkServerConfig;
+import csx55.dfs.config.ChunkServerConfig;
 
 import java.io.IOException;
 import java.nio.file.Files;

@@ -1,7 +1,7 @@
-package dfs.payload;
+package csx55.dfs.payload;
 
 
-import dfs.domain.ChunkMetaData;
+import csx55.dfs.domain.ChunkMetaData;
 
 import java.io.Serializable;
 import java.util.ArrayList;

@@ -1,23 +1,30 @@
-package dfs.replication;
+package csx55.dfs.replication;
 
-import dfs.config.ChunkServerConfig;
-import dfs.domain.ChunkServerInfo;
-import dfs.domain.Node;
-import dfs.domain.UserCommands;
-import dfs.payload.MajorHeartBeat;
-import dfs.payload.MinorHeartBeat;
-import dfs.transport.TCPConnection;
-import dfs.transport.TCPServerThread;
-import dfs.utils.FileUtils;
+import csx55.dfs.config.ChunkServerConfig;
+import csx55.dfs.domain.ChunkMetaData;
+import csx55.dfs.domain.Node;
+import csx55.dfs.transport.TCPConnection;
+import csx55.dfs.transport.TCPServerThread;
+import csx55.dfs.utils.FileUtils;
+import csx55.dfs.payload.MajorHeartBeat;
+import csx55.dfs.payload.MinorHeartBeat;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -39,6 +46,9 @@ public class ChunkServer implements Node {
     private final AtomicLong lastMajorHeartbeat = new AtomicLong(0);
 
     private int salt;
+
+    private Map<String, ChunkMetaData> chunkMetaDataMap = new ConcurrentHashMap<>();
+
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -63,6 +73,7 @@ public class ChunkServer implements Node {
               * Setup the heartbeat transmission schedule
               */
             chunkServer.initiateHeartBeat();
+            chunkServer.startScheduledChunkMetaDataCheck();
 
             while (true) {
 
@@ -119,6 +130,44 @@ public class ChunkServer implements Node {
         executor.scheduleAtFixedRate(this::sendMinorHeartBeat, 0, 15, TimeUnit.SECONDS);
         executor.scheduleAtFixedRate(this::sendMajorHeartBeat, 0, 120, TimeUnit.SECONDS);
     }
+
+    public void startScheduledChunkMetaDataCheck() {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        scheduler.scheduleAtFixedRate(this::checkAndUpdateMetadata, 5, 25, TimeUnit.SECONDS); // Runs every hour
+    }
+
+    private void checkAndUpdateMetadata() {
+        try {
+            Files.walkFileTree(Path.of(ChunkServerConfig.DEBUG_MODE ?
+                            ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY
+                            : ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY + "/" + salt),
+                    new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    String key = file.toString();
+                    ChunkMetaData metadata = chunkMetaDataMap.get(key);
+                    if (metadata == null) {
+                        // Create and add new metadata if it doesn't exist
+                        metadata = new ChunkMetaData(1, 0, LocalDateTime.now(ZoneId.systemDefault())); // Initial version 1, sequence 0
+                        metadata.setLastUpdated(attrs.creationTime().toInstant());
+                        chunkMetaDataMap.put(key, metadata);
+                        System.out.println("New metadata created for: " + file);
+                    }
+                    else if (metadata.getLastUpdatedMillis() < attrs.lastModifiedTime().toMillis()) {
+                        metadata.incrementVersion();
+                        metadata.setLastUpdated(FileTime.fromMillis(attrs.lastModifiedTime().toMillis()).toInstant());
+                        chunkMetaDataMap.put(key, metadata); // Update the map with the new metadata
+                        System.out.println("Metadata updated for: " + file);
+                    }
+
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
 
 
 
