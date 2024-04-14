@@ -1,6 +1,8 @@
 package csx55.dfs.transport;
 
 
+import csx55.dfs.domain.Protocol;
+import csx55.dfs.payload.Message;
 import csx55.dfs.replication.Controller;
 import csx55.dfs.domain.Node;
 import csx55.dfs.payload.MajorHeartBeat;
@@ -12,6 +14,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.Serializable;
 import java.net.Socket;
+import java.util.List;
 
 public class TCPReceiverThread implements Runnable {
     private Socket messageSource;
@@ -57,11 +60,18 @@ public class TCPReceiverThread implements Runnable {
                  * Controller operations
                  */
                 if (node instanceof Controller) {
+                    Controller controller = ((Controller) node);
                     if (object instanceof MajorHeartBeat) {
-                        ((Controller) node).receiveMajorHeartBeat((MajorHeartBeat) object);
+                        controller.receiveMajorHeartBeat((MajorHeartBeat) object);
                     }
                     else if (object instanceof MinorHeartBeat) {
-                        ((Controller)node).receiveMinorHeartBeat((MinorHeartBeat) object);
+                        controller.receiveMinorHeartBeat((MinorHeartBeat) object);
+                    }
+                    else if (object instanceof Message) {
+                        Message msg = (Message) object;
+                        if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_REQUEST) {
+                            controller.generateChunkServerRankingForClient(connection, (Integer) msg.getPayload());
+                        }
                     }
                 }
                 /***
@@ -75,7 +85,13 @@ public class TCPReceiverThread implements Runnable {
                  * Client operations
                  */
                 else if (node instanceof Client) {
-
+                    Client client = (Client) node;
+                    if (object instanceof Message) {
+                        Message msg = (Message) object;
+                        if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_RESPONSE) {
+                            client.receiveChunkServerRankingFromController((List<List<String>>) msg.getPayload());
+                        }
+                    }
                 }
             } catch (Exception ex) {
                 this.close();

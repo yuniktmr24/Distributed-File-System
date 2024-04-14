@@ -4,8 +4,11 @@ import csx55.dfs.config.ControllerConfig;
 import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.ChunkServerInfo;
 import csx55.dfs.domain.Node;
+import csx55.dfs.domain.Protocol;
 import csx55.dfs.payload.MajorHeartBeat;
+import csx55.dfs.payload.Message;
 import csx55.dfs.payload.MinorHeartBeat;
+import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
 import csx55.dfs.utils.ChunkServerRanker;
 
@@ -137,6 +140,20 @@ public class Controller implements Node {
     private void printSpaceAvailableMapElement (Map <String, Long> chunkServerAvailableSpaceMap) {
         for (Map.Entry<String, Long> entry: chunkServerAvailableSpaceMap.entrySet()) {
             System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
+    }
+
+
+    /***
+     * Message acknowledgments when Controller is the receiver
+     */
+    public void generateChunkServerRankingForClient (TCPConnection conn, int numChunks) {
+        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap);
+        try {
+            Message rankingResponse = new Message(Protocol.CHUNK_SERVER_RANKING_RESPONSE, serversForChunks);
+            conn.getSenderThread().sendData(rankingResponse);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 

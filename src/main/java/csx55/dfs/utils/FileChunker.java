@@ -17,9 +17,10 @@ public class FileChunker {
      * @return a list of ChunkWrapper objects, each containing a chunk of the file and its name.
      * @throws IOException if an I/O error occurs reading from the file.
      */
-    public List<ChunkWrapper> chunkFile(String filePath) throws IOException {
+    public static List<ChunkWrapper> chunkFile(String filePath) throws IOException {
         File file = new File(filePath);
         String baseFileName = file.getName();
+        String fPath = file.getPath();
         List<ChunkWrapper> chunks = new ArrayList<>();
         try (FileInputStream fis = new FileInputStream(file)) {
             byte[] buffer = new byte[CHUNK_SIZE];
@@ -36,8 +37,8 @@ public class FileChunker {
                     // Use the full buffer if we read a full chunk
                     chunkData = buffer.clone();
                 }
-                String chunkName = baseFileName + "_chunk" + (++chunkCount);
-                chunks.add(new ChunkWrapper(chunkData, chunkName));
+                String chunkName = fPath + "_chunk" + (++chunkCount);
+                chunks.add(new ChunkWrapper(chunkData, chunkName, fPath));
             }
         }
         return chunks;

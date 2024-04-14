@@ -4,9 +4,12 @@ public class ChunkWrapper {
     private byte[] data;
     private String chunkName;
 
-    public ChunkWrapper(byte[] data, String chunkName) {
+    private String filePath;
+
+    public ChunkWrapper(byte[] data, String chunkName, String filePath) {
         this.data = data;
         this.chunkName = chunkName;
+        this.filePath = filePath;
     }
 
     public byte[] getData() {
@@ -15,5 +18,9 @@ public class ChunkWrapper {
 
     public String getChunkName() {
         return chunkName;
+    }
+
+    public String getFilePath() {
+        return filePath;
     }
 }
