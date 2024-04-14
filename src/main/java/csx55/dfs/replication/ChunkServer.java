@@ -4,8 +4,10 @@ import csx55.dfs.config.ChunkServerConfig;
 import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.Node;
 import csx55.dfs.payload.ChunkPayload;
+import csx55.dfs.payload.Message;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
+import csx55.dfs.utils.ChunkWrapper;
 import csx55.dfs.utils.FileChecksumCalculator;
 import csx55.dfs.utils.FileUtils;
 import csx55.dfs.payload.MajorHeartBeat;
@@ -15,10 +17,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
@@ -297,6 +296,34 @@ public class ChunkServer implements Node {
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    /***
+     * When client or another chunk server requests a chunk, send it over
+     * @param conn
+     * @param msg
+     */
+    public void sendChunks (TCPConnection conn, Message msg) {
+        String chunkToBeSent = (String) msg.getPayload();
+        Path filePath = Paths.get(this.fileStorageDirectory, chunkToBeSent).toAbsolutePath();
+
+        try {
+            // Read all bytes from the file
+            byte[] fileData = Files.readAllBytes(filePath);
+
+            // Extract the chunk name from the file path (assumes filePath is correctly formed)
+            String chunkName = filePath.getFileName().toString();
+
+            // Create a new ChunkWrapper with the read data
+            ChunkWrapper chunk = new ChunkWrapper(fileData, chunkName, filePath.toString());
+
+            // Send the ChunkWrapper object to the client
+            conn.getSenderThread().sendObject(chunk);
+            System.out.println("Sent chunk: " + chunkName + " to client.");
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Error reading the file or sending data: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

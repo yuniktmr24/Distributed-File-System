@@ -5,6 +5,7 @@ import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.ChunkServerInfo;
 import csx55.dfs.domain.Node;
 import csx55.dfs.domain.Protocol;
+import csx55.dfs.payload.ChunkLocationPayload;
 import csx55.dfs.payload.MajorHeartBeat;
 import csx55.dfs.payload.Message;
 import csx55.dfs.payload.MinorHeartBeat;
@@ -168,6 +169,41 @@ public class Controller implements Node {
             conn.getSenderThread().sendData(rankingResponse);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /***
+     * Send replica location for a file when requested
+     * Client will request this during download
+     * ChunkServer will request this during recovery from tampering
+     */
+
+    public void sendReplicaLocations(TCPConnection conn, Message msg) {
+        //file for which replica request was requested
+        String replicaInfoRequestedFor = (String) msg.getPayload();
+
+        Map<String, List<String>> filteredChunkLocations = new HashMap<>();
+
+        // Iterate over the entries in the chunk storage map
+        for (Map.Entry<String, List<String>> entry : chunkStorageMap.entrySet()) {
+            String chunkKey = entry.getKey();
+
+            // Check if the chunk key starts with the file description plus "_chunk"
+            if (chunkKey.startsWith(replicaInfoRequestedFor + "_chunk")
+            || chunkKey.equals(replicaInfoRequestedFor)) { //the chunkServer will send exact chunk info in the request, so adding OR to handle that
+                // If it matches, put the chunk and its server list into the new map
+                filteredChunkLocations.put(chunkKey, entry.getValue());
+            }
+        }
+
+        // Create a ChunkLocationPayload object with the filtered map
+        ChunkLocationPayload payload = new ChunkLocationPayload(filteredChunkLocations);
+
+        try {
+            conn.getSenderThread().sendObject(payload);
+        } catch (IOException | InterruptedException e) {
+            System.err.println("Failed to send chunk location data: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

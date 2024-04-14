@@ -3,10 +3,12 @@ package csx55.dfs.replication;
 import csx55.dfs.domain.Node;
 import csx55.dfs.domain.Protocol;
 import csx55.dfs.domain.UserCommands;
+import csx55.dfs.payload.ChunkLocationPayload;
 import csx55.dfs.payload.ChunkPayload;
 import csx55.dfs.payload.Message;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.utils.ChunkWrapper;
+import csx55.dfs.utils.FileAssembler;
 import csx55.dfs.utils.FileChunker;
 
 import java.io.BufferedReader;
@@ -18,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.stream.Collectors;
 
 public class Client implements Node {
@@ -26,6 +29,15 @@ public class Client implements Node {
     private List <ChunkWrapper> chunks = new ArrayList<>();
 
     private Map <String, TCPConnection> tcpCache = new HashMap<>();
+
+    /***
+     * Latch to wait until all chunks of a file have been received
+     * from the chunkServer(s) before assembly
+     */
+    private CountDownLatch allChunksDownloaded;
+
+    private String fileDownloadPath;
+
     public static void main (String [] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -81,6 +93,7 @@ public class Client implements Node {
                             userInput.startsWith(String.valueOf(UserCommands.DOWNLOAD_FILE.getCmdId()))) {
                         validDownloadFilesCmd = true;
                         downloadFileName = userInput.split(" ")[1];
+                        fileDownloadPath = userInput.split(" ")[2];
                     }
                 }
                 if (containsSpace && validUploadFilesCmd) {
@@ -102,6 +115,15 @@ public class Client implements Node {
                     } catch (IOException e) {
                         System.err.println("Error processing file: " + e.getMessage());
                     }
+                }
+                else if (containsSpace && validDownloadFilesCmd) {
+                    /***
+                     * First talk to controller providing the file path
+                     * The controller replies with the replicas where
+                     * the file is dispersed across
+                     */
+                    Message downloadMsgToController = new Message(Protocol.REPLICA_LOCATION_REQUEST, downloadFileName);
+                    controllerConnection.getSenderThread().sendData(downloadMsgToController);
                 }
             }
 
@@ -143,6 +165,57 @@ public class Client implements Node {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public void receiveChunkReplicationLocationsFromController(ChunkLocationPayload payload) {
+        Map <String, List<String>> chunkLocationMap = payload.getChunkLocations();
+
+        System.out.println("Chunk Locations:");
+        chunkLocationMap.forEach((key, value) ->
+                System.out.println(key + " -> " + value.stream()
+                        .collect(Collectors.joining(", ", "[", "]")))
+        );
+
+        //we have the locations now. Let's ping only the first element in the list
+        //of replica holder to avoid fetching multiple replicas of a chunk
+        //list to hold all chunks of the given file. let's clear it and reuse it
+        //in the receiver method
+        chunks.clear();
+        allChunksDownloaded = new CountDownLatch(chunkLocationMap.size());
+
+        for (Map.Entry<String, List<String>> chunkLocation: chunkLocationMap.entrySet()) {
+            String chunkInfo = chunkLocation.getKey();
+            String chunkHolder = chunkLocation.getValue().get(0);
+
+            String chunkHolderIP = chunkHolder.split(":")[0];
+            int chunkHolderPort = Integer.parseInt(chunkHolder.split(":")[1]);
+
+            Message requestChunkMsg = new Message(Protocol.REQUEST_CHUNK, chunkInfo);
+            TCPConnection conn = getTCPConnection(tcpCache, chunkHolderIP, chunkHolderPort);
+
+
+            try {
+                conn.getSenderThread().sendData(requestChunkMsg);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        //let's wait for all chunks to be downloaded
+        try {
+            allChunksDownloaded.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        //time for assembly and downloading to the specified directory now
+        FileAssembler.assembleChunks(chunks, fileDownloadPath);
+    }
+
+    public void receiveChunkFromChunkServer(ChunkWrapper chunkWrapper) {
+        chunks.add(chunkWrapper);
+        System.out.println(chunkWrapper.getChunkName() + " received from chunk server");
+        allChunksDownloaded.countDown();
     }
 
     /***

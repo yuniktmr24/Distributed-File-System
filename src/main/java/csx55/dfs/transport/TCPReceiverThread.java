@@ -2,12 +2,9 @@ package csx55.dfs.transport;
 
 
 import csx55.dfs.domain.Protocol;
-import csx55.dfs.payload.ChunkPayload;
-import csx55.dfs.payload.Message;
+import csx55.dfs.payload.*;
 import csx55.dfs.replication.Controller;
 import csx55.dfs.domain.Node;
-import csx55.dfs.payload.MajorHeartBeat;
-import csx55.dfs.payload.MinorHeartBeat;
 import csx55.dfs.replication.ChunkServer;
 import csx55.dfs.replication.Client;
 import csx55.dfs.utils.ChunkWrapper;
@@ -74,6 +71,9 @@ public class TCPReceiverThread implements Runnable {
                         if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_REQUEST) {
                             controller.generateChunkServerRankingForClient(connection, (Integer) msg.getPayload(), msg.getAdditionalPayload());
                         }
+                        else if (msg.getProtocol() == Protocol.REPLICA_LOCATION_REQUEST) {
+                            controller.sendReplicaLocations(connection, msg);
+                        }
                     }
                 }
                 /***
@@ -87,6 +87,12 @@ public class TCPReceiverThread implements Runnable {
                          */
                         chunkServer.receiveChunks((ChunkPayload) object);
                     }
+                    else if (object instanceof Message) {
+                        Message msg = (Message) object;
+                        if (msg.getProtocol() == Protocol.REQUEST_CHUNK) {
+                            chunkServer.sendChunks(connection, msg);
+                        }
+                    }
                 }
 
                 /***
@@ -99,6 +105,12 @@ public class TCPReceiverThread implements Runnable {
                         if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_RESPONSE) {
                             client.receiveChunkServerRankingFromController((List<List<String>>) msg.getPayload());
                         }
+                    }
+                    else if (object instanceof ChunkLocationPayload) {
+                        client.receiveChunkReplicationLocationsFromController((ChunkLocationPayload) object);
+                    }
+                    else if (object instanceof ChunkWrapper) {
+                        client.receiveChunkFromChunkServer((ChunkWrapper) object);
                     }
                 }
             } catch (Exception ex) {
