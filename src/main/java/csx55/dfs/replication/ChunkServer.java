@@ -161,7 +161,7 @@ public class ChunkServer implements Node {
         Runnable checksumVerificationTask = this::verifyCheckSumsAndInitiateRepair;
 
         // Schedule the task to run every 15 seconds
-        scheduler.scheduleAtFixedRate(checksumVerificationTask, 5, 60, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(checksumVerificationTask, 5, 15, TimeUnit.SECONDS);
     }
 
     /***
