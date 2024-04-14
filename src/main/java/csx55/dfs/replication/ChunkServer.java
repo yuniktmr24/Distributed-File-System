@@ -58,6 +58,8 @@ public class ChunkServer implements Node {
 
     private CountDownLatch waitForNodeInfoAboutPureReplicas;
 
+    private CountDownLatch checksumsVerified;
+
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -156,80 +158,90 @@ public class ChunkServer implements Node {
 
     private void startScheduledChunkChecksumCheck() {
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
-        Runnable checksumVerificationTask = () -> {
-            Map<String, List<String>> currentCheckSums = FileChecksumCalculator.getChecksumMapForChunkInDirectory(this.fileStorageDirectory);
-            System.out.println("Scheduled checksum calculation completed. Total files processed: " + currentCheckSums.size());
-            Map <String, List <Integer>> checksumViolationMap = verifyChecksums(currentCheckSums);
-
-            for (Map.Entry<String, List<Integer>> chunkChecksum: checksumViolationMap.entrySet()) {
-                List <Integer> checksumViolationSlices = chunkChecksum.getValue();
-                if (!checksumViolationSlices.isEmpty()) {
-                    /***
-                     *    we will need to perform erasure coding
-                     *    either via @replication or @reed-solomon.
-                     *
-                     *    first tell controller about the violation
-                     *    tell which chunk is violated e.g: data.txt_chunk1
-                     *
-                     *    A] FOR REPLICATION:
-                     *    the controller will then return a list of other nodes
-                     *    holding the replica for this chunk
-                     *
-                     *    this node will then contact the other nodes and try to perform
-                     *    restoration. But for that, when the other node receives the
-                     *    ERASURE_VIA_REPLICATION_REQUEST, it will need to verify that
-                     *    its checksumViolationMap doesn't have a non-empty list for
-                     *    the given chunk. Else, it will return an error message in the
-                     *    payload
-                     *
-                     */
-                    //TODO
-                    waitForNodeInfoAboutPureReplicas = new CountDownLatch(1);
-                    //Before RepairRequest. Let us talk to the controller, requesting node
-                    //with proper replica.
-                    Message requestForPristineChunkLocation = new Message(Protocol.PRISTINE_CHUNK_LOCATION_REQUEST,
-                            chunkChecksum.getKey(), Collections.singletonList(this.descriptor));
-                    try {
-                        this.controllerConnection.getSenderThread().sendData(requestForPristineChunkLocation);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                    /***
-                     * Let's wait for the controller to reply with list of pure replicas
-                     */
-                    try {
-                        waitForNodeInfoAboutPureReplicas.await();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                    ChunkRepairRequest chunkRepair = new ChunkRepairRequest(this.descriptor,
-                            chunkChecksum.getKey(), checksumViolationSlices);
-                    System.out.println("Tampered checksum description ");
-                    System.out.println(chunkRepair.toString());
-
-                    /***
-                     * Pick one node from the list of nodes with pure replicas
-                     */
-                    String selectedNodeWithPureReplica = this.nodesWithPureReplica.get(0);
-
-                    String selectedNodeWithPureReplicaIP = selectedNodeWithPureReplica.split(":")[0];
-                    int selectedNodeWithPureReplicaPort = Integer.parseInt(selectedNodeWithPureReplica.split(":")[1]);
-
-                    TCPConnection conn = getTCPConnection(tcpCache, selectedNodeWithPureReplicaIP, selectedNodeWithPureReplicaPort);
-
-                    try {
-                        conn.getSenderThread().sendData(chunkRepair);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-
-
-                }
-            }
-        };
+        Runnable checksumVerificationTask = this::verifyCheckSumsAndInitiateRepair;
 
         // Schedule the task to run every 15 seconds
-        scheduler.scheduleAtFixedRate(checksumVerificationTask, 5, 15, TimeUnit.SECONDS);
+        scheduler.scheduleAtFixedRate(checksumVerificationTask, 5, 60, TimeUnit.SECONDS);
+    }
+
+    /***
+     * Sub-Routine to verify checksums and contact controller for pure replicas if violations
+     * are detected
+     */
+    private void verifyCheckSumsAndInitiateRepair () {
+        Map<String, List<String>> currentCheckSums = FileChecksumCalculator.getChecksumMapForChunkInDirectory(this.fileStorageDirectory);
+        System.out.println("Scheduled checksum calculation completed. Total files processed: " + currentCheckSums.size());
+        Map <String, List <Integer>> checksumViolationMap = verifyChecksums(currentCheckSums);
+
+        for (Map.Entry<String, List<Integer>> chunkChecksum: checksumViolationMap.entrySet()) {
+            List<Integer> checksumViolationSlices = chunkChecksum.getValue();
+            if (!checksumViolationSlices.isEmpty()) {
+                /***
+                 *    we will need to perform erasure coding
+                 *    either via @replication or @reed-solomon.
+                 *
+                 *    first tell controller about the violation
+                 *    tell which chunk is violated e.g: data.txt_chunk1
+                 *
+                 *    A] FOR REPLICATION:
+                 *    the controller will then return a list of other nodes
+                 *    holding the replica for this chunk
+                 *
+                 *    this node will then contact the other nodes and try to perform
+                 *    restoration. But for that, when the other node receives the
+                 *    ERASURE_VIA_REPLICATION_REQUEST, it will need to verify that
+                 *    its checksumViolationMap doesn't have a non-empty list for
+                 *    the given chunk. Else, it will return an error message in the
+                 *    payload
+                 *
+                 */
+                //TODO
+                waitForNodeInfoAboutPureReplicas = new CountDownLatch(1);
+                //Before RepairRequest. Let us talk to the controller, requesting node
+                //with proper replica.
+                Message requestForPristineChunkLocation = new Message(Protocol.PRISTINE_CHUNK_LOCATION_REQUEST,
+                        chunkChecksum.getKey(), Collections.singletonList(this.descriptor));
+                try {
+                    this.controllerConnection.getSenderThread().sendData(requestForPristineChunkLocation);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                /***
+                 * Let's wait for the controller to reply with list of pure replicas
+                 */
+                try {
+                    waitForNodeInfoAboutPureReplicas.await();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                ChunkRepairRequest chunkRepair = new ChunkRepairRequest(this.descriptor,
+                        chunkChecksum.getKey(), checksumViolationSlices);
+                System.out.println("Tampered checksum description ");
+                System.out.println(chunkRepair.toString());
+
+                /***
+                 * Pick one node from the list of nodes with pure replicas
+                 */
+                String selectedNodeWithPureReplica = this.nodesWithPureReplica.get(0);
+
+                String selectedNodeWithPureReplicaIP = selectedNodeWithPureReplica.split(":")[0];
+                int selectedNodeWithPureReplicaPort = Integer.parseInt(selectedNodeWithPureReplica.split(":")[1]);
+
+                TCPConnection conn = getTCPConnection(tcpCache, selectedNodeWithPureReplicaIP, selectedNodeWithPureReplicaPort);
+
+                try {
+                    conn.getSenderThread().sendData(chunkRepair);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            //no errors. so okay to release latch
+            else {
+                if (checksumsVerified != null) {
+                    checksumsVerified.countDown();
+                }
+            }
+        }
     }
 
     public Map <String, List <Integer>> verifyChecksums(Map<String, List<String>> currentChecksums) {
@@ -339,6 +351,10 @@ public class ChunkServer implements Node {
                 throw new RuntimeException(e);
             }
         }
+        /***
+         * Calculate the checksum for newly uploaded file
+         */
+        verifyCheckSumsAndInitiateRepair();
     }
 
     /***
@@ -347,6 +363,15 @@ public class ChunkServer implements Node {
      * @param msg
      */
     public void sendChunks (TCPConnection conn, Message msg) {
+        //first verify check sums are correct
+        checksumsVerified = new CountDownLatch(1);
+        verifyCheckSumsAndInitiateRepair();
+        //wait for checkSumsToBeVerified
+        try {
+            checksumsVerified.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         String chunkToBeSent = (String) msg.getPayload();
         Path filePath = Paths.get(this.fileStorageDirectory, chunkToBeSent).toAbsolutePath();
 
@@ -434,6 +459,9 @@ public class ChunkServer implements Node {
                 channel.write(java.nio.ByteBuffer.wrap(sliceData)); // Write the replacement data
             }
             System.out.println("Repair completed for " + chunkPath);
+            if (checksumsVerified != null) {
+                checksumsVerified.countDown();
+            }
             // Optionally log the successful repair or notify via TCPConnection
             connection.getSenderThread().sendObject("Repair completed for " + chunkPath);
         } catch (IOException e) {
