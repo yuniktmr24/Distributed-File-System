@@ -24,6 +24,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class Controller implements Node {
     /***
@@ -206,5 +207,45 @@ public class Controller implements Node {
             e.printStackTrace();
         }
     }
+
+    /***
+     * The chunkServer contacts us saying that the chunk is tampered.
+     * We will now return the list of potentially pure replicas to the origin node
+     * 'Potentially', because the other nodes might have reported corruption as well
+     *
+     * @param conn
+     * @param msg
+     */
+    public void sendPristineReplicaLocation (TCPConnection conn, Message msg) {
+        String originNodeWithCorruptedSlice = msg.getAdditionalPayload().get(0);
+        String corruptedChunkPath = (String) msg.getPayload();
+
+        // Retrieve the list of nodes that store this chunk
+        List<String> nodesWithReplica = chunkStorageMap.get(corruptedChunkPath);
+
+        if (nodesWithReplica == null) {
+            System.out.println("No nodes found for the given chunk path");
+            return;
+        }
+
+        // Filter out the node with the corrupted slice
+        List<String> nodesWithPristineReplica = nodesWithReplica.stream()
+                .filter(node -> !node.equals(originNodeWithCorruptedSlice))
+                .collect(Collectors.toList());
+
+        // Example: Send the list of pristine replicas back to the requester
+        // You might need to serialize the list or handle it according to your application's needs
+        try {
+            conn.getSenderThread().sendData(new Message(Protocol.PRISTINE_CHUNK_LOCATION_RESPONSE, "",
+                    nodesWithPristineReplica));
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
+        // Alternatively, handle the list of nodes as needed by your application logic
+        System.out.println("Pristine replicas are located at: " + nodesWithPristineReplica);
+
+    }
+
 
 }

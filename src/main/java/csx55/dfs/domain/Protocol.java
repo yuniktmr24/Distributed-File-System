@@ -10,5 +10,9 @@ public interface Protocol {
     final int REPLICA_LOCATION_RESPONSE = 4;
 
     final int REQUEST_CHUNK = 5;
+
+    final int PRISTINE_CHUNK_LOCATION_REQUEST = 6;
+
+    final int PRISTINE_CHUNK_LOCATION_RESPONSE = 7;
 }
 

@@ -3,20 +3,22 @@ package csx55.dfs.replication;
 import csx55.dfs.config.ChunkServerConfig;
 import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.Node;
-import csx55.dfs.payload.ChunkPayload;
-import csx55.dfs.payload.Message;
+import csx55.dfs.domain.Protocol;
+import csx55.dfs.payload.*;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
 import csx55.dfs.utils.ChunkWrapper;
 import csx55.dfs.utils.FileChecksumCalculator;
 import csx55.dfs.utils.FileUtils;
-import csx55.dfs.payload.MajorHeartBeat;
-import csx55.dfs.payload.MinorHeartBeat;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
@@ -24,10 +26,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -54,6 +53,10 @@ public class ChunkServer implements Node {
     private String fileStorageDirectory;
 
     private Map <String, TCPConnection> tcpCache = new HashMap<>();
+
+    private List <String> nodesWithPureReplica = new ArrayList<>();
+
+    private CountDownLatch waitForNodeInfoAboutPureReplicas;
 
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
@@ -181,6 +184,45 @@ public class ChunkServer implements Node {
                      *
                      */
                     //TODO
+                    waitForNodeInfoAboutPureReplicas = new CountDownLatch(1);
+                    //Before RepairRequest. Let us talk to the controller, requesting node
+                    //with proper replica.
+                    Message requestForPristineChunkLocation = new Message(Protocol.PRISTINE_CHUNK_LOCATION_REQUEST,
+                            chunkChecksum.getKey(), Collections.singletonList(this.descriptor));
+                    try {
+                        this.controllerConnection.getSenderThread().sendData(requestForPristineChunkLocation);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    /***
+                     * Let's wait for the controller to reply with list of pure replicas
+                     */
+                    try {
+                        waitForNodeInfoAboutPureReplicas.await();
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    ChunkRepairRequest chunkRepair = new ChunkRepairRequest(this.descriptor,
+                            chunkChecksum.getKey(), checksumViolationSlices);
+                    System.out.println("Tampered checksum description ");
+                    System.out.println(chunkRepair.toString());
+
+                    /***
+                     * Pick one node from the list of nodes with pure replicas
+                     */
+                    String selectedNodeWithPureReplica = this.nodesWithPureReplica.get(0);
+
+                    String selectedNodeWithPureReplicaIP = selectedNodeWithPureReplica.split(":")[0];
+                    int selectedNodeWithPureReplicaPort = Integer.parseInt(selectedNodeWithPureReplica.split(":")[1]);
+
+                    TCPConnection conn = getTCPConnection(tcpCache, selectedNodeWithPureReplicaIP, selectedNodeWithPureReplicaPort);
+
+                    try {
+                        conn.getSenderThread().sendData(chunkRepair);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+
 
                 }
             }
@@ -324,6 +366,87 @@ public class ChunkServer implements Node {
         } catch (IOException | InterruptedException e) {
             System.err.println("Error reading the file or sending data: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    /***
+     * Controller returned the list of potentially pristine replicas. let's store that info
+     * to state
+     */
+    public void receivePristineReplicaLocation (TCPConnection conn, Message msg) {
+        this.nodesWithPureReplica = msg.getAdditionalPayload();
+        waitForNodeInfoAboutPureReplicas.countDown();
+        System.out.println("Nodes with pure replica as reported by Controller "+ this.nodesWithPureReplica);
+    }
+
+    /**
+     * Retrieves specific slices from a chunk file as requested and hydrates a ChunkRepairResponse object.
+     *
+     * @param request the chunk repair request detailing which slices are corrupt.
+     * @return ChunkRepairResponse containing the slices data for repair.
+     */
+    public void sendRequestedSlicesForRepair(TCPConnection conn, ChunkRepairRequest request) throws IOException {
+        File file = new File(this.fileStorageDirectory + request.getChunkFullPath());
+        Map<Integer, byte[]> chunkRepairMap = new ConcurrentHashMap<>();
+
+        try (FileInputStream fis = new FileInputStream(file)) {
+            for (Integer sliceIndex : request.getCorruptSlices()) {
+                fis.getChannel().position((long) sliceIndex * ChunkServerConfig.MAX_SLICE_SIZE);
+                byte[] sliceData = new byte[ChunkServerConfig.MAX_SLICE_SIZE];
+                int bytesRead = fis.read(sliceData);
+                if (bytesRead != ChunkServerConfig.MAX_SLICE_SIZE) {
+                    // If less data is read than expected, copy the valid bytes
+                    byte[] validData = new byte[bytesRead];
+                    System.arraycopy(sliceData, 0, validData, 0, bytesRead);
+                    sliceData = validData;
+                }
+                chunkRepairMap.put(sliceIndex, sliceData);
+            }
+        }
+
+        ChunkRepairResponse response = new ChunkRepairResponse(chunkRepairMap);
+        response.setChunkFullPath(request.getChunkFullPath());
+        response.setChunkName(request.getChunkName());
+        response.setCorruptSlices(new ArrayList<>(request.getCorruptSlices()));
+
+        try {
+            conn.getSenderThread().sendData(response);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /***
+     * Time to repair the slices now
+     * @param repairResponse
+     */
+    public void repairSlices(TCPConnection connection, ChunkRepairResponse repairResponse) {
+        String chunkPath = repairResponse.getChunkFullPath(); // Get the full path to the chunk
+        Map<Integer, byte[]> repairMap = repairResponse.getChunkRepairMap(); // Get the map of indices to slice data
+
+        try (RandomAccessFile raf = new RandomAccessFile(this.fileStorageDirectory + chunkPath, "rw");
+             FileChannel channel = raf.getChannel()) {
+
+            for (Map.Entry<Integer, byte[]> entry : repairMap.entrySet()) {
+                long position = (long) entry.getKey() * ChunkServerConfig.MAX_SLICE_SIZE; // Calculate the position in the file
+                byte[] sliceData = entry.getValue(); // Get the replacement data for the slice
+                channel.position(position); // Position the file channel
+                channel.write(java.nio.ByteBuffer.wrap(sliceData)); // Write the replacement data
+            }
+            System.out.println("Repair completed for " + chunkPath);
+            // Optionally log the successful repair or notify via TCPConnection
+            connection.getSenderThread().sendObject("Repair completed for " + chunkPath);
+        } catch (IOException e) {
+            System.err.println("Error repairing file slices: " + e.getMessage());
+            try {
+                connection.getSenderThread().sendObject("Error during repair: " + e.getMessage());
+            } catch (IOException ex) {
+                System.err.println("Failed to send error message over TCP connection: " + ex.getMessage());
+            } catch (InterruptedException ex) {
+                throw new RuntimeException(ex);
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 

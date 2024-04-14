@@ -74,6 +74,9 @@ public class TCPReceiverThread implements Runnable {
                         else if (msg.getProtocol() == Protocol.REPLICA_LOCATION_REQUEST) {
                             controller.sendReplicaLocations(connection, msg);
                         }
+                        else if (msg.getProtocol() == Protocol.PRISTINE_CHUNK_LOCATION_REQUEST) {
+                            controller.sendPristineReplicaLocation(connection, msg);
+                        }
                     }
                 }
                 /***
@@ -92,7 +95,26 @@ public class TCPReceiverThread implements Runnable {
                         if (msg.getProtocol() == Protocol.REQUEST_CHUNK) {
                             chunkServer.sendChunks(connection, msg);
                         }
+                        else if (msg.getProtocol() == Protocol.PRISTINE_CHUNK_LOCATION_RESPONSE) {
+                            chunkServer.receivePristineReplicaLocation(connection, msg);
+                        }
                     }
+                    /***
+                     * The chunkserver with corrupted slice has requested us for the
+                     * pristine slice
+                     */
+                    else if (object instanceof ChunkRepairRequest) {
+                        ChunkRepairRequest repairRequest = (ChunkRepairRequest) object;
+                        chunkServer.sendRequestedSlicesForRepair(connection, repairRequest);
+                    }
+                    /***
+                     * The chunkServer with pristine copy of the replica has replied
+                     */
+                    else if (object instanceof ChunkRepairResponse) {
+                        ChunkRepairResponse repairResponse = (ChunkRepairResponse) object;
+                        chunkServer.repairSlices(connection, repairResponse);
+                    }
+
                 }
 
                 /***

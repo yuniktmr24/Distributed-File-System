@@ -83,7 +83,7 @@ public class FileChecksumCalculator {
             for (Path file : files) {
                 byte[] fileData = Files.readAllBytes(file);
                 List<String> checksums = computeChecksums(fileData);
-                checksumMap.put(String.valueOf(file.getFileName()), checksums);
+                checksumMap.put(String.valueOf(file).replaceFirst(storageRoot, ""), checksums);
                 System.out.println("Checksums for file: " + file.getFileName());
                 for (int i = 0; i < checksums.size(); i++) {
                     System.out.println(" Slice " + (i + 1) + ": " + checksums.get(i));
