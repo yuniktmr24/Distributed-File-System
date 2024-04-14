@@ -5,6 +5,7 @@ import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.Node;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
+import csx55.dfs.utils.FileChecksumCalculator;
 import csx55.dfs.utils.FileUtils;
 import csx55.dfs.payload.MajorHeartBeat;
 import csx55.dfs.payload.MinorHeartBeat;
@@ -22,6 +23,8 @@ import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -49,6 +52,8 @@ public class ChunkServer implements Node {
 
     private Map<String, ChunkMetaData> chunkMetaDataMap = new ConcurrentHashMap<>();
 
+    private Map<String, List<String>> initialChecksums = new ConcurrentHashMap<>();
+
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -71,9 +76,12 @@ public class ChunkServer implements Node {
 
              /***
               * Setup the heartbeat transmission schedule
+              * Setup the metadata - last modified, incrementVersion update schedule
+              * Setup the checksum integrity checker schedule
               */
             chunkServer.initiateHeartBeat();
             chunkServer.startScheduledChunkMetaDataCheck();
+            chunkServer.startScheduledChunkChecksumCheck();
 
             while (true) {
 
@@ -131,10 +139,81 @@ public class ChunkServer implements Node {
         executor.scheduleAtFixedRate(this::sendMajorHeartBeat, 0, 120, TimeUnit.SECONDS);
     }
 
-    public void startScheduledChunkMetaDataCheck() {
+    private void startScheduledChunkMetaDataCheck() {
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         scheduler.scheduleAtFixedRate(this::checkAndUpdateMetadata, 5, 25, TimeUnit.SECONDS); // Runs every hour
     }
+
+    private void startScheduledChunkChecksumCheck() {
+        ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+        Runnable checksumVerificationTask = () -> {
+            Map<String, List<String>> currentCheckSums = FileChecksumCalculator.getChecksumMapForChunkInDirectory(ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY);
+            System.out.println("Scheduled checksum calculation completed. Total files processed: " + currentCheckSums.size());
+            Map <String, List <Integer>> checksumViolationMap = verifyChecksums(currentCheckSums);
+
+            for (Map.Entry<String, List<Integer>> chunkChecksum: checksumViolationMap.entrySet()) {
+                List <Integer> checksumViolationSlices = chunkChecksum.getValue();
+                if (!checksumViolationSlices.isEmpty()) {
+                    /***
+                     *    we will need to perform erasure coding
+                     *    either via @replication or @reed-solomon.
+                     *
+                     *    first tell controller about the violation
+                     *    tell which chunk is violated e.g: data.txt_chunk1
+                     *
+                     *    A] FOR REPLICATION:
+                     *    the controller will then return a list of other nodes
+                     *    holding the replica for this chunk
+                     *
+                     *    this node will then contact the other nodes and try to perform
+                     *    restoration. But for that, when the other node receives the
+                     *    ERASURE_VIA_REPLICATION_REQUEST, it will need to verify that
+                     *    its checksumViolationMap doesn't have a non-empty list for
+                     *    the given chunk. Else, it will return an error message in the
+                     *    payload
+                     *
+                     */
+                    //TODO
+
+                }
+            }
+        };
+
+        // Schedule the task to run every 15 seconds
+        scheduler.scheduleAtFixedRate(checksumVerificationTask, 5, 15, TimeUnit.SECONDS);
+    }
+
+    public Map <String, List <Integer>> verifyChecksums(Map<String, List<String>> currentChecksums) {
+        Map <String, List <Integer>> checksumViolationMap = new HashMap<>();
+        currentChecksums.forEach((filePath, newChecksums) -> {
+            List<String> oldChecksums = initialChecksums.get(filePath);
+            if (oldChecksums == null) {
+                System.out.println("New file detected: " + filePath);
+                initialChecksums.put(filePath, new ArrayList<>(newChecksums));
+                System.out.println("Checksums for new file added to initial checksums map.");
+            } else {
+                boolean mismatchFound = false;
+                List <Integer> violationSlices = new ArrayList<>();
+                for (int i = 0; i < newChecksums.size(); i++) {
+                    if (!newChecksums.get(i).equals(oldChecksums.get(i))) {
+                        System.out.printf("Checksum mismatch detected in %s at slice %d%n", filePath, i + 1);
+                        mismatchFound = true;
+                        violationSlices.add(i);
+                        checksumViolationMap.put(filePath, violationSlices);
+                        if (checksumViolationMap.containsKey(filePath)) {
+                            checksumViolationMap.replace(filePath, violationSlices);
+                        }
+                    }
+                }
+                if (!mismatchFound) {
+                    System.out.printf("No checksum mismatch detected for file %s%n", filePath);
+                    checksumViolationMap.put(filePath, violationSlices);
+                }
+            }
+        });
+        return checksumViolationMap;
+    }
+
 
     private void checkAndUpdateMetadata() {
         try {
@@ -167,10 +246,6 @@ public class ChunkServer implements Node {
             e.printStackTrace();
         }
     }
-
-
-
-
 
     public void setAndStartControllerConnection(TCPConnection controllerConnection) {
         this.controllerConnection = controllerConnection;
