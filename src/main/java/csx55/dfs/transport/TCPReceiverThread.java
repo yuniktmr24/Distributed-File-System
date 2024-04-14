@@ -2,6 +2,7 @@ package csx55.dfs.transport;
 
 
 import csx55.dfs.domain.Protocol;
+import csx55.dfs.payload.ChunkPayload;
 import csx55.dfs.payload.Message;
 import csx55.dfs.replication.Controller;
 import csx55.dfs.domain.Node;
@@ -9,6 +10,7 @@ import csx55.dfs.payload.MajorHeartBeat;
 import csx55.dfs.payload.MinorHeartBeat;
 import csx55.dfs.replication.ChunkServer;
 import csx55.dfs.replication.Client;
+import csx55.dfs.utils.ChunkWrapper;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -78,7 +80,13 @@ public class TCPReceiverThread implements Runnable {
                  *  Chunk Server operations
                  */
                 else if (node instanceof ChunkServer) {
-
+                    ChunkServer chunkServer = (ChunkServer) node;
+                    if (object instanceof ChunkPayload) {
+                        /***
+                         * well this means we have received chunks
+                         */
+                        chunkServer.receiveChunks((ChunkPayload) object);
+                    }
                 }
 
                 /***

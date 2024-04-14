@@ -3,6 +3,7 @@ package csx55.dfs.replication;
 import csx55.dfs.config.ChunkServerConfig;
 import csx55.dfs.domain.ChunkMetaData;
 import csx55.dfs.domain.Node;
+import csx55.dfs.payload.ChunkPayload;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
 import csx55.dfs.utils.FileChecksumCalculator;
@@ -254,5 +255,22 @@ public class ChunkServer implements Node {
 
     public String getDescriptor() {
         return descriptor;
+    }
+
+
+    /***
+     * Message acknowledgments when ChunkServer is the receiver
+     */
+    public void receiveChunks (ChunkPayload chunkPayload) {
+        System.out.println("Recieved chunk "+ chunkPayload.getChunkWrapper().getChunkName());
+
+        /***
+         * First persist the chunk here locally and
+         * then check the replicationPath and propagate the chunk to the other replicas
+         * until we reach the terminal node.
+         */
+
+
+
     }
 }

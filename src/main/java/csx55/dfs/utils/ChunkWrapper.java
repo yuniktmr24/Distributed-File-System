@@ -1,6 +1,9 @@
 package csx55.dfs.utils;
 
-public class ChunkWrapper {
+import java.io.Serializable;
+
+public class ChunkWrapper implements Serializable {
+    private static final long serialVersionUID = 1L;
     private byte[] data;
     private String chunkName;
 
