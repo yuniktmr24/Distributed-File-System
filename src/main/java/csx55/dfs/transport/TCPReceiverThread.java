@@ -72,7 +72,7 @@ public class TCPReceiverThread implements Runnable {
                     else if (object instanceof Message) {
                         Message msg = (Message) object;
                         if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_REQUEST) {
-                            controller.generateChunkServerRankingForClient(connection, (Integer) msg.getPayload());
+                            controller.generateChunkServerRankingForClient(connection, (Integer) msg.getPayload(), msg.getAdditionalPayload());
                         }
                     }
                 }

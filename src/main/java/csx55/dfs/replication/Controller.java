@@ -147,8 +147,22 @@ public class Controller implements Node {
     /***
      * Message acknowledgments when Controller is the receiver
      */
-    public void generateChunkServerRankingForClient (TCPConnection conn, int numChunks) {
+    public void generateChunkServerRankingForClient (TCPConnection conn, int numChunks, List <String> chunkNames) {
         List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap);
+
+        /***
+         * Fill in the local chunk storage map
+         * In the future, when client requests download for a file
+         * we can use this map to assemble the chunks and then send
+         * the whole file to client.
+         */
+        for (int i = 0; i < chunkNames.size(); i++) {
+            String chunkName = chunkNames.get(i);
+            //replica servers where this chunk and its replicas are stored
+            List <String> replicaServers = serversForChunks.get(i);
+            chunkStorageMap.put(chunkName, replicaServers);
+        }
+
         try {
             Message rankingResponse = new Message(Protocol.CHUNK_SERVER_RANKING_RESPONSE, serversForChunks);
             conn.getSenderThread().sendData(rankingResponse);

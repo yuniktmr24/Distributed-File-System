@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class Client implements Node {
     private TCPConnection controllerConnection;
@@ -93,8 +94,9 @@ public class Client implements Node {
                          * Cool. chunks have been created. Now let us contact the controller to
                          * get the top 3 available nodes for each chunk. (Rep. factor = 3)
                          */
+                        List <String> chunkNames = chunks.stream().map(ChunkWrapper::getChunkName).collect(Collectors.toList());
 
-                        Message rankingMsg = new Message(Protocol.CHUNK_SERVER_RANKING_REQUEST, chunks.size());
+                        Message rankingMsg = new Message(Protocol.CHUNK_SERVER_RANKING_REQUEST, chunks.size(), chunkNames);
                         controllerConnection.getSenderThread().sendData(rankingMsg);
 
                     } catch (IOException e) {

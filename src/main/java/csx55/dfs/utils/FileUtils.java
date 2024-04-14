@@ -1,6 +1,7 @@
 package csx55.dfs.utils;
 
 import csx55.dfs.config.ChunkServerConfig;
+import csx55.dfs.payload.ChunkPayload;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -68,5 +69,25 @@ public class FileUtils {
             }
         }
         return totalSize;
+    }
+
+    public static void storeFile(ChunkPayload chunkPayload, String fileStorageDirectory) {
+        try {
+            String chunkName = chunkPayload.getChunkWrapper().getChunkName();  // Get the full path and filename
+            byte[] data = chunkPayload.getChunkWrapper().getData();  // Get the byte array data
+
+            Path destinationPath = Paths.get(fileStorageDirectory, chunkName).toAbsolutePath();  // Combine and resolve the path
+
+            // Ensure directories exist or create them
+            Files.createDirectories(destinationPath.getParent());
+
+            // Write the byte array to the file
+            Files.write(destinationPath, data);
+
+            System.out.println("File written successfully to: " + destinationPath);
+        } catch (IOException e) {
+            System.err.println("Failed to write the file: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

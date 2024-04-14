@@ -24,10 +24,7 @@ import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -55,17 +52,24 @@ public class ChunkServer implements Node {
 
     private Map<String, List<String>> initialChecksums = new ConcurrentHashMap<>();
 
+    private String fileStorageDirectory;
+
+    private Map <String, TCPConnection> tcpCache = new HashMap<>();
+
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
              ServerSocket chunkServerSocket = new ServerSocket(0);
         ) {
             ChunkServer chunkServer = new ChunkServer();
+
+             if (args.length == 1 && ChunkServerConfig.DEBUG_MODE) {
+                 chunkServer.salt = Integer.parseInt(args[0]);
+             }
+
             chunkServer.setServiceDiscovery(InetAddress.getLocalHost().getHostAddress(), chunkServerSocket.getLocalPort());
 
-            if (args.length == 1 && ChunkServerConfig.DEBUG_MODE) {
-                chunkServer.salt = Integer.parseInt(args[0]);
-            }
+
 
              /***
               * Set up controller connection
@@ -96,6 +100,9 @@ public class ChunkServer implements Node {
         this.nodeIp = ip;
         this.nodePort = port;
         this.descriptor = ip + ":" + port;
+        this.fileStorageDirectory = !ChunkServerConfig.DEBUG_MODE ?
+                ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY
+                : ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY + "/" + ip + "-" +  salt;
     }
 
 
@@ -148,7 +155,7 @@ public class ChunkServer implements Node {
     private void startScheduledChunkChecksumCheck() {
         ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
         Runnable checksumVerificationTask = () -> {
-            Map<String, List<String>> currentCheckSums = FileChecksumCalculator.getChecksumMapForChunkInDirectory(ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY);
+            Map<String, List<String>> currentCheckSums = FileChecksumCalculator.getChecksumMapForChunkInDirectory(this.fileStorageDirectory);
             System.out.println("Scheduled checksum calculation completed. Total files processed: " + currentCheckSums.size());
             Map <String, List <Integer>> checksumViolationMap = verifyChecksums(currentCheckSums);
 
@@ -218,9 +225,7 @@ public class ChunkServer implements Node {
 
     private void checkAndUpdateMetadata() {
         try {
-            Files.walkFileTree(Path.of(ChunkServerConfig.DEBUG_MODE ?
-                            ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY
-                            : ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY + "/" + salt),
+            Files.walkFileTree(Path.of(this.fileStorageDirectory),
                     new SimpleFileVisitor<Path>() {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
@@ -262,15 +267,60 @@ public class ChunkServer implements Node {
      * Message acknowledgments when ChunkServer is the receiver
      */
     public void receiveChunks (ChunkPayload chunkPayload) {
-        System.out.println("Recieved chunk "+ chunkPayload.getChunkWrapper().getChunkName());
+        System.out.println("Received chunk "+ chunkPayload.getChunkWrapper().getChunkName());
 
         /***
          * First persist the chunk here locally and
          * then check the replicationPath and propagate the chunk to the other replicas
          * until we reach the terminal node.
          */
+        FileUtils.storeFile(chunkPayload, this.fileStorageDirectory);
+
+        /***
+         * Verify that this chunk Server isn't the last element on the replication path
+         * If it's not then it will pass the chunk over to another chunk server
+         * on the replication path
+         */
+        String lastElInReplicationPath = chunkPayload.
+                getReplicationPath().
+                get(chunkPayload.getReplicationPath().size() - 1);
+        int currentIndex = chunkPayload.getReplicationPath().indexOf(this.descriptor);
+        if (!Objects.equals(this.getDescriptor(), lastElInReplicationPath)) {
+            //forward chunks to next chunk server in the replication path
+            String nextChunkServer = chunkPayload.getReplicationPath().get(currentIndex + 1);
+            String nextChunkServerIp = nextChunkServer.split(":")[0];
+            int nextChunkServerPort = Integer.parseInt(nextChunkServer.split(":")[1]);
+
+            TCPConnection conn = getTCPConnection(tcpCache, nextChunkServerIp, nextChunkServerPort);
+            try {
+                conn.getSenderThread().sendData(chunkPayload);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
 
 
-
+    /***
+     * TCP Cache
+     */
+    public TCPConnection getTCPConnection(Map<String, TCPConnection> tcpCache, String chunkServerIp, int chunkServerPort) {
+        TCPConnection conn = null;
+        if (tcpCache.containsKey(chunkServerIp+ ":" + chunkServerPort)) {
+            conn = tcpCache.get(chunkServerIp+ ":" + chunkServerPort);
+        }
+        else {
+            try {
+                Socket clientSocket = new Socket(chunkServerIp, chunkServerPort);
+                conn = new TCPConnection(this, clientSocket);
+                tcpCache.put(chunkServerIp + ":" + chunkServerPort, conn);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        if (!conn.isStarted()) {
+            conn.startConnection();
+        }
+        return conn;
     }
 }
