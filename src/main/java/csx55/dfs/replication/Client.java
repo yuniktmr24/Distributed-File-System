@@ -41,8 +41,7 @@ public class Client {
                 System.out.println("User input detected " + userInput);
                 boolean containsSpace = false,
                         validUploadFilesCmd = false,
-                        validDownloadFilesCmd = false,
-                        validCheckSuccessorCmd = false;
+                        validDownloadFilesCmd = false;
                 String uploadFilePath = ""; //local path to file to be uploaded
                 String downloadFileName = "";
                 if (userInput.contains(" ")) {
@@ -60,6 +59,7 @@ public class Client {
                     }
                 }
             }
+
         }
         catch (Exception ex) {
 

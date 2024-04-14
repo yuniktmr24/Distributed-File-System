@@ -7,6 +7,7 @@ import csx55.dfs.domain.Node;
 import csx55.dfs.payload.MajorHeartBeat;
 import csx55.dfs.payload.MinorHeartBeat;
 import csx55.dfs.transport.TCPServerThread;
+import csx55.dfs.utils.ChunkServerRanker;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -87,6 +88,18 @@ public class Controller implements Node {
         logger.log(Level.INFO, "Received major heart beat at: {0}", formatter.format(now));
         lastHeartbeatReceived.put(majorHb.getHeartBeatOrigin(), System.currentTimeMillis());
         System.out.println(majorHb.toString());
+
+        if (chunkServerAvailableSpaceMap.containsKey(majorHb.getHeartBeatOrigin())) {
+            chunkServerAvailableSpaceMap.replace(majorHb.getHeartBeatOrigin(), majorHb.getFreeSpaceAvailable());
+        }
+        else {
+            chunkServerAvailableSpaceMap.put(majorHb.getHeartBeatOrigin(), majorHb.getFreeSpaceAvailable());
+        }
+        //printSpaceAvailableMapElement(chunkServerAvailableSpaceMap);
+        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
+        for (int i = 0; i < serversForChunks.size(); i++) {
+            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
+        }
     }
 
     public synchronized void receiveMinorHeartBeat(MinorHeartBeat minorHb) {
@@ -94,6 +107,18 @@ public class Controller implements Node {
         logger.log(Level.INFO, "Received minor heart beat at: {0}", formatter.format(now));
         lastHeartbeatReceived.put(minorHb.getHeartBeatOrigin(), System.currentTimeMillis());
         System.out.println(minorHb.toString());
+
+        if (chunkServerAvailableSpaceMap.containsKey(minorHb.getHeartBeatOrigin())) {
+            chunkServerAvailableSpaceMap.replace(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
+        }
+        else {
+            chunkServerAvailableSpaceMap.put(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
+        }
+        //printSpaceAvailableMapElement(chunkServerAvailableSpaceMap);
+        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
+        for (int i = 0; i < serversForChunks.size(); i++) {
+            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
+        }
     }
 
     private static void setupHeartbeatChecker() {
@@ -107,6 +132,12 @@ public class Controller implements Node {
                 }
             });
         }, 1, 1, TimeUnit.MINUTES); // Check every minute
+    }
+
+    private void printSpaceAvailableMapElement (Map <String, Long> chunkServerAvailableSpaceMap) {
+        for (Map.Entry<String, Long> entry: chunkServerAvailableSpaceMap.entrySet()) {
+            System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
     }
 
 }
