@@ -10,6 +10,8 @@ public class ChunkServerInfo {
 
     private long availableSpace;
 
+    private List <String> storedChunks;
+
 
     //metadata info for all chunk files in the chunkServer
     private List<ChunkMetaData> metaData = new ArrayList<>();
@@ -41,6 +43,14 @@ public class ChunkServerInfo {
 
     public void setAvailableSpace(long availableSpace) {
         this.availableSpace = availableSpace;
+    }
+
+    public List<String> getStoredChunks() {
+        return storedChunks;
+    }
+
+    public void setStoredChunks(List<String> storedChunks) {
+        this.storedChunks = storedChunks;
     }
 }
 

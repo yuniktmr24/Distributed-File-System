@@ -15,6 +15,7 @@ import csx55.dfs.utils.ChunkServerRanker;
 
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -51,7 +52,7 @@ public class Controller implements Node {
      *  be compared against the HEARTBEAT_TIMEOUT interval to detect disconnected
      *  chunkServers and initiate fault tolerance / recovery procedures
      */
-    private static Map <String, ChunkServerInfo> chunkServerInfoMap;
+    private static Map <String, List <String>> chunkServerInfoMap; //list of chunks a chunkServer maintains
 
     private static Map <String, List <ChunkMetaData>> chunkMetaDataMap;
 
@@ -68,6 +69,14 @@ public class Controller implements Node {
         chunkServerAvailableSpaceMap = new ConcurrentHashMap<>();
         lastHeartbeatReceived = new ConcurrentHashMap<>();
     }
+
+    /***
+     * Set of chunk servers that have sent heartbeat to controller
+     * leading to its "discovery"
+     */
+    private static Set <String> discoveredChunkServers = new HashSet<>();
+
+    private static Map <String, TCPConnection> tcpCache = new HashMap<>();
     private static final Logger logger = Logger.getLogger(Controller.class.getName());
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Controller instance = new Controller();
@@ -89,6 +98,9 @@ public class Controller implements Node {
     }
 
     public synchronized void receiveMajorHeartBeat (MajorHeartBeat majorHb) {
+        discoveredChunkServers.add(majorHb.getHeartBeatOrigin());
+        chunkServerInfoMap.put(majorHb.getHeartBeatOrigin(), majorHb.getAllChunkFiles());
+
         LocalDateTime now = LocalDateTime.now();
         logger.log(Level.INFO, "Received major heart beat at: {0}", formatter.format(now));
         lastHeartbeatReceived.put(majorHb.getHeartBeatOrigin(), System.currentTimeMillis());
@@ -134,9 +146,106 @@ public class Controller implements Node {
                     logger.warning("Heartbeat timeout for server: " + key);
                     // Here you might also want to try reconnecting or marking the server as down.
                     //TODO fault tolerance. File transfers via data plane
+                    /***
+                     * First remove the down server from our storage space maps
+                     */
+                    chunkServerAvailableSpaceMap.remove(key);
+
+                    /***
+                     * Removing down server from our chunk to replica server map
+                     */
+                    chunkStorageMap.forEach((chunkPath, nodeList) -> {
+                        // Filter out the down node from each list
+                        List<String> updatedList = nodeList.stream()
+                                .filter(node -> !node.equals(key))
+                                .collect(Collectors.toList());
+                        // Update the map with the new list
+                        chunkStorageMap.put(chunkPath, updatedList);
+                    });
+
+                    // Optionally, remove any entries that now have empty lists if that makes sense for your logic
+                    chunkStorageMap.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+
+                    /***
+                     * Now that the maps are reconstructed, let us start recovery procedure
+                     * to restore the number of replicas
+                     * First let us search for the chunks the lost node was responsible for
+                     */
+                    List <String> lostChunks = chunkServerInfoMap.get(key);
+                    //now let us figure out the proper nodes to store each of these chunks
+                    //NOTE: we cannot store replica of same node on one machine
+                    for (String chunk : lostChunks) {
+                        List<String> replicaNodes =
+                                chunkStorageMap.isEmpty()
+                                        || !chunkStorageMap.containsKey(chunk)
+                                ? new ArrayList<>() : chunkStorageMap.get(chunk);
+
+                        //well this happens if the user uploaded nothing
+                        //and all existing chunks are from a previous time
+                        //in that case, use the live chunkServerInfoMap
+                        if (chunkStorageMap.isEmpty() || !chunkStorageMap.containsKey(chunk)) {
+                            for (Map.Entry<String, List<String>> entry : chunkServerInfoMap.entrySet()) {
+                                // Check if the node's list of chunks contains the current chunk
+                                if (entry.getValue().contains(chunk)) {
+                                    // If it contains, add the node's name to the replicaNodes list
+                                    replicaNodes.add(entry.getKey());
+                                }
+                            }
+                        }
+
+                        // Ensure replicaNodes is not null to avoid NullPointerException
+                        if (replicaNodes != null) {
+                            Optional<String> server = discoveredChunkServers.stream()
+                                    .filter(el -> !replicaNodes.contains(el))
+                                    .findFirst();
+
+                            /***
+                             * Let's initiate recovery at newly appointed backup node
+                             */
+                            if (server.isPresent()) {
+                                //remove the dead replica node if it's present in the replica list
+                                List <String> filteredReplicas = replicaNodes.stream()
+                                        .filter(i -> !i.equals(key)).collect(Collectors.toList());
+                                String selectedServer = server.get();
+                                // Do something with selectedServer, such as initiate a repair operation
+                                System.out.println("Selected server for chunk " + chunk + ": " + selectedServer);
+
+                                TCPConnection connectionToBackup = getTCPConnection(tcpCache,
+                                        selectedServer.split(":")[0],
+                                        Integer.parseInt(selectedServer.split(":")[1]));
+
+                                Message recoveryMsg = new Message(Protocol.RECOVER_REPLICA, chunk, filteredReplicas);
+                                try {
+                                    connectionToBackup.getSenderThread().sendData(recoveryMsg);
+                                } catch (InterruptedException e) {
+                                    e.printStackTrace();
+                                    throw new RuntimeException(e);
+                                }
+                                //add newly appointed replica holder to the storage Map
+                                if (chunkStorageMap.get(chunk) != null) {
+                                    chunkStorageMap.get(chunk).add(selectedServer);
+                                }
+                                else {
+                                    //chunkStorageMap empty as in no uploads
+                                    //only archived chunk files scenario
+                                    List <String> location = new ArrayList<>();
+                                    location.add(selectedServer);
+                                    chunkStorageMap.put(chunk, location);
+                                }
+
+                            } else {
+                                System.out.println("No available servers found for chunk " + chunk);
+                            }
+                        } else {
+                            System.out.println("No replica nodes found for chunk " + chunk);
+                        }
+                    }
+                    //remove the faulty node entry since recovery is done
+                    lastHeartbeatReceived.remove(key);
+
                 }
             });
-        }, 1, 1, TimeUnit.MINUTES); // Check every minute
+        }, 5, 30, TimeUnit.SECONDS); // Check every minute
     }
 
     private void printSpaceAvailableMapElement (Map <String, Long> chunkServerAvailableSpaceMap) {
@@ -247,5 +356,28 @@ public class Controller implements Node {
 
     }
 
+
+    /***
+     * TCP Cache
+     */
+    public static TCPConnection getTCPConnection(Map<String, TCPConnection> tcpCache, String chunkServerIp, int chunkServerPort) {
+        TCPConnection conn = null;
+        if (tcpCache.containsKey(chunkServerIp+ ":" + chunkServerPort)) {
+            conn = tcpCache.get(chunkServerIp+ ":" + chunkServerPort);
+        }
+        else {
+            try {
+                Socket clientSocket = new Socket(chunkServerIp, chunkServerPort);
+                conn = new TCPConnection(Controller.getInstance(), clientSocket);
+                tcpCache.put(chunkServerIp + ":" + chunkServerPort, conn);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        if (!conn.isStarted()) {
+            conn.startConnection();
+        }
+        return conn;
+    }
 
 }

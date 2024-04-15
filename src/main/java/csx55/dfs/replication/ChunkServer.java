@@ -30,6 +30,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 public class ChunkServer implements Node {
     private static final Logger logger = Logger.getLogger(ChunkServer.class.getName());
@@ -138,6 +139,15 @@ public class ChunkServer implements Node {
         MajorHeartBeat majorHB = new MajorHeartBeat(getDescriptor(),
                 ChunkServerConfig.DEBUG_MODE ? FileUtils.getNumberOfChunks(nodeIp, salt) : FileUtils.getNumberOfChunks(),
                 ChunkServerConfig.DEBUG_MODE ? FileUtils.getAvailableStorage(nodeIp, salt) : FileUtils.getAvailableStorage());
+
+        List <Path> chunkFilePaths = ChunkServerConfig.DEBUG_MODE ? FileUtils.getChunkFilesWithExtension(nodeIp, salt) : FileUtils.getChunkFilesWithExtension("");
+        //fully qualified names - including path info
+        List <String> chunkFileNames = chunkFilePaths.stream()
+                .map(Path::toString)
+                .map(el -> el.replace(this.fileStorageDirectory, ""))
+                .collect(Collectors.toList());
+        majorHB.setAllChunkFiles(chunkFileNames);
+
         try {
             this.controllerConnection.getSenderThread().sendData(majorHB);
         } catch (InterruptedException e) {
@@ -319,7 +329,7 @@ public class ChunkServer implements Node {
     /***
      * Message acknowledgments when ChunkServer is the receiver
      */
-    public void receiveChunks (ChunkPayload chunkPayload) {
+    public synchronized void receiveChunks (ChunkPayload chunkPayload) {
         System.out.println("Received chunk "+ chunkPayload.getChunkWrapper().getChunkName());
 
         /***
@@ -358,11 +368,40 @@ public class ChunkServer implements Node {
     }
 
     /***
+     * Received chunkwrapper from possibly a fellow chunk server holding a replica
+     * during recovery via replication
+     * so no need to deal with replication path
+     * @param chunkWrapper
+     */
+    public synchronized void receiveChunksAsWrapper (ChunkWrapper chunkWrapper) {
+        System.out.println("Received chunk "+ chunkWrapper.getChunkName());
+
+        /***
+         * First persist the chunk here locally and
+         * then check the replicationPath and propagate the chunk to the other replicas
+         * until we reach the terminal node.
+         */
+        //create dummy payload
+        ChunkPayload chunkPayload = new ChunkPayload(chunkWrapper, new ArrayList<>());
+        FileUtils.storeFile(chunkPayload, this.fileStorageDirectory);
+
+        /***
+         * chunkwrappers won't have replication paths because this is received from
+         * a fellow chunk server during recovery procedures
+         */
+
+        /***
+         * Calculate the checksum for newly uploaded file
+         */
+        verifyCheckSumsAndInitiateRepair();
+    }
+
+    /***
      * When client or another chunk server requests a chunk, send it over
      * @param conn
      * @param msg
      */
-    public void sendChunks (TCPConnection conn, Message msg) {
+    public synchronized void sendChunks (TCPConnection conn, Message msg) {
         //first verify check sums are correct
         checksumsVerified = new CountDownLatch(1);
         verifyCheckSumsAndInitiateRepair();
@@ -373,21 +412,21 @@ public class ChunkServer implements Node {
             throw new RuntimeException(e);
         }
         String chunkToBeSent = (String) msg.getPayload();
-        Path filePath = Paths.get(this.fileStorageDirectory, chunkToBeSent).toAbsolutePath();
+        Path filePath = Paths.get(this.fileStorageDirectory, chunkToBeSent);
 
         try {
             // Read all bytes from the file
             byte[] fileData = Files.readAllBytes(filePath);
 
             // Extract the chunk name from the file path (assumes filePath is correctly formed)
-            String chunkName = filePath.getFileName().toString();
+            String chunkName = filePath.toString().replace(this.fileStorageDirectory, "");
 
             // Create a new ChunkWrapper with the read data
             ChunkWrapper chunk = new ChunkWrapper(fileData, chunkName, filePath.toString());
 
             // Send the ChunkWrapper object to the client
             conn.getSenderThread().sendObject(chunk);
-            System.out.println("Sent chunk: " + chunkName + " to client.");
+            System.out.println("Sent chunk: " + chunkName + " to the requester");
         } catch (IOException | InterruptedException e) {
             System.err.println("Error reading the file or sending data: " + e.getMessage());
             e.printStackTrace();
@@ -476,6 +515,33 @@ public class ChunkServer implements Node {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /***
+     * Elected as new backup, now got to fetch the lost replica to our storage
+     * Use the recoveryMsg -> additionalPayload field since it contains
+     * the info about live node which contains this replica
+     * we'll request chunk from this node
+     * @param recoveryMsg
+     */
+    public void recoverReplica(Message recoveryMsg) {
+        System.out.println("Received replica recovery message");
+        String lostChunkToRecover = (String) recoveryMsg.getPayload();
+        String liveNodeWithReplica = recoveryMsg.getAdditionalPayload().get(0);
+
+        String liveNodeWithReplicaIP = liveNodeWithReplica.split(":")[0];
+        int liveNodeWithReplicaPort = Integer.parseInt(liveNodeWithReplica.split(":")[1]);
+        TCPConnection connectionToLiveNode = getTCPConnection(tcpCache,
+                liveNodeWithReplicaIP,
+                liveNodeWithReplicaPort);
+
+        Message chunkRequest = new Message(Protocol.REQUEST_CHUNK, lostChunkToRecover);
+        try {
+            connectionToLiveNode.getSenderThread().sendData(chunkRequest);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+
     }
 
 

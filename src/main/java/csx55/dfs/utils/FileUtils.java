@@ -29,6 +29,10 @@ public class FileUtils {
         return getChunkFilesWithExtension(ip + "-" + port).size();
     }
 
+    public static List <Path> getChunkFilesWithExtension(String ip, Integer port) {
+        return getChunkFilesWithExtension(ip + "-" + port);
+    }
+
     public static long getAvailableStorage(String ip, Integer port) {
         List <Path> chunkFiles = getChunkFilesWithExtension(ip + "-" + port);
         long storageConsumed = calculateTotalSize(chunkFiles);
@@ -36,7 +40,7 @@ public class FileUtils {
         return ChunkServerConfig.CHUNK_SERVER_INITIAL_FREE_SPACE - storageConsumed;
     }
 
-    private static List<Path> getChunkFilesWithExtension(String pathAddendum) {
+    public static List<Path> getChunkFilesWithExtension(String pathAddendum) {
         Path rootPath = Paths.get(ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY
          + (pathAddendum.isEmpty() ? "" : "/" + pathAddendum));
         if (!Files.exists(rootPath)) {
@@ -76,7 +80,7 @@ public class FileUtils {
             String chunkName = chunkPayload.getChunkWrapper().getChunkName();  // Get the full path and filename
             byte[] data = chunkPayload.getChunkWrapper().getData();  // Get the byte array data
 
-            Path destinationPath = Paths.get(fileStorageDirectory, chunkName).toAbsolutePath();  // Combine and resolve the path
+            Path destinationPath = Paths.get(fileStorageDirectory, chunkName);  // Combine and resolve the path
 
             // Ensure directories exist or create them
             Files.createDirectories(destinationPath.getParent());

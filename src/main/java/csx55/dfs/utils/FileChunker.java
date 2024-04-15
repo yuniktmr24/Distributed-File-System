@@ -18,9 +18,12 @@ public class FileChunker {
      * @throws IOException if an I/O error occurs reading from the file.
      */
     public static List<ChunkWrapper> chunkFile(String filePath) throws IOException {
+        return chunkFile(filePath, "");
+    }
+    public static List<ChunkWrapper> chunkFile(String filePath, String uploadDestination) throws IOException {
         File file = new File(filePath);
         String baseFileName = file.getName();
-        String fPath = file.getPath();
+        String fPath = uploadDestination.isEmpty() ? file.getPath() : uploadDestination;
         List<ChunkWrapper> chunks = new ArrayList<>();
         try (FileInputStream fis = new FileInputStream(file)) {
             byte[] buffer = new byte[CHUNK_SIZE];

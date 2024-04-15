@@ -81,6 +81,7 @@ public class Client implements Node {
                         validDownloadFilesCmd = false;
                 String uploadFilePath = ""; //local path to file to be uploaded
                 String downloadFileName = "";
+                String fileUploadDest = "";
                 if (userInput.contains(" ")) {
                     containsSpace = true;
                     if (userInput.startsWith(UserCommands.UPLOAD_FILE.getCmd()) ||
@@ -88,6 +89,7 @@ public class Client implements Node {
                             userInput.startsWith(String.valueOf(UserCommands.UPLOAD_FILE.getCmdId()))) {
                         validUploadFilesCmd = true;
                         uploadFilePath = userInput.split(" ")[1];
+                        fileUploadDest = userInput.split(" ")[2];
                     } else if (userInput.startsWith(UserCommands.DOWNLOAD_FILE.getCmd()) ||
                             userInput.toUpperCase().contains("download") ||
                             userInput.startsWith(String.valueOf(UserCommands.DOWNLOAD_FILE.getCmdId()))) {
@@ -98,7 +100,9 @@ public class Client implements Node {
                 }
                 if (containsSpace && validUploadFilesCmd) {
                     try {
-                        chunks = FileChunker.chunkFile(uploadFilePath);
+                        chunks = fileUploadDest.isEmpty() ?
+                                FileChunker.chunkFile(uploadFilePath)
+                                : FileChunker.chunkFile(uploadFilePath, fileUploadDest);
                         System.out.println("Total chunks created: " + chunks.size());
                         for (ChunkWrapper chunk : chunks) {
                             System.out.println("Chunk " + chunk.getChunkName() + " size: " + chunk.getData().length + " bytes");

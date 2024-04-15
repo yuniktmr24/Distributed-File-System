@@ -90,6 +90,9 @@ public class TCPReceiverThread implements Runnable {
                          */
                         chunkServer.receiveChunks((ChunkPayload) object);
                     }
+                    else if (object instanceof ChunkWrapper) {
+                        chunkServer.receiveChunksAsWrapper((ChunkWrapper) object);
+                    }
                     else if (object instanceof Message) {
                         Message msg = (Message) object;
                         if (msg.getProtocol() == Protocol.REQUEST_CHUNK) {
@@ -97,6 +100,11 @@ public class TCPReceiverThread implements Runnable {
                         }
                         else if (msg.getProtocol() == Protocol.PRISTINE_CHUNK_LOCATION_RESPONSE) {
                             chunkServer.receivePristineReplicaLocation(connection, msg);
+                        }
+                        else if (msg.getProtocol() == Protocol.RECOVER_REPLICA) {
+                            //when one node goes down, and this node gets elected as backup
+                            //for replica
+                            chunkServer.recoverReplica(msg);
                         }
                     }
                     /***
