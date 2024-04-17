@@ -61,6 +61,11 @@ public class ChunkServer implements Node {
 
     private CountDownLatch checksumsVerified;
 
+    /***
+     * Chunks which were part of the previous minor/major heartbeat sync
+     */
+    private List <String> previouslySyncedChunks = new ArrayList<>();
+
     public static void main(String[] args) {
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -125,11 +130,31 @@ public class ChunkServer implements Node {
         MinorHeartBeat minorHB = new MinorHeartBeat(getDescriptor(),
                 ChunkServerConfig.DEBUG_MODE ? FileUtils.getNumberOfChunks(nodeIp, salt) : FileUtils.getNumberOfChunks(),
                 ChunkServerConfig.DEBUG_MODE ? FileUtils.getAvailableStorage(nodeIp, salt) : FileUtils.getAvailableStorage());
+
+        List <Path> chunkFilePaths = ChunkServerConfig.DEBUG_MODE ? FileUtils.getChunkFilesWithExtension(nodeIp, salt) : FileUtils.getChunkFilesWithExtension("");
+        //fully qualified names - including path info
+        List <String> currentChunkFileNames = chunkFilePaths.stream()
+                .map(Path::toString)
+                .map(el -> el.replace(this.fileStorageDirectory, ""))
+                .collect(Collectors.toList());
+
+        Set<String> previouslySyncedSet = new HashSet<>(previouslySyncedChunks);
+        Set<String> currentFileSet = new HashSet<>(currentChunkFileNames);
+
+        currentFileSet.removeAll(previouslySyncedSet);
+        System.out.println("New chunks since last sync: " + currentFileSet);
+
+        List<String> newChunks = new ArrayList<>(currentFileSet);
+
+        minorHB.setNewChunkFiles(new ArrayList<>(currentFileSet));
+
         try {
             this.controllerConnection.getSenderThread().sendData(minorHB);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
+        // Add new chunks to the previously synced chunks list
+        previouslySyncedChunks.addAll(newChunks);
     }
 
     private void sendMajorHeartBeat() {
@@ -146,6 +171,7 @@ public class ChunkServer implements Node {
                 .map(Path::toString)
                 .map(el -> el.replace(this.fileStorageDirectory, ""))
                 .collect(Collectors.toList());
+        previouslySyncedChunks = chunkFileNames;
         majorHB.setAllChunkFiles(chunkFileNames);
 
         try {

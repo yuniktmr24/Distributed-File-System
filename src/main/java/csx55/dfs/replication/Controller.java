@@ -124,6 +124,12 @@ public class Controller implements Node {
         logger.log(Level.INFO, "Received minor heart beat at: {0}", formatter.format(now));
         lastHeartbeatReceived.put(minorHb.getHeartBeatOrigin(), System.currentTimeMillis());
         System.out.println(minorHb.toString());
+        if (chunkServerInfoMap.containsKey(minorHb.getHeartBeatOrigin())) {
+            chunkServerInfoMap.get(minorHb.getHeartBeatOrigin()).addAll(minorHb.getNewChunkFiles());
+        }
+        else {
+            chunkServerInfoMap.put(minorHb.getHeartBeatOrigin(), minorHb.getNewChunkFiles());
+        }
 
         if (chunkServerAvailableSpaceMap.containsKey(minorHb.getHeartBeatOrigin())) {
             chunkServerAvailableSpaceMap.replace(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
@@ -165,6 +171,8 @@ public class Controller implements Node {
 
                     // Optionally, remove any entries that now have empty lists if that makes sense for your logic
                     chunkStorageMap.entrySet().removeIf(entry -> entry.getValue().isEmpty());
+                    //remove the disconnected server so that we don't end up selecting it as a backup
+                    discoveredChunkServers.removeIf(i -> i.equals(key));
 
                     /***
                      * Now that the maps are reconstructed, let us start recovery procedure
@@ -195,8 +203,10 @@ public class Controller implements Node {
 
                         // Ensure replicaNodes is not null to avoid NullPointerException
                         if (replicaNodes != null) {
+                            //the new backup server shouldn't have a replica for the chunk already
+                            //and it shouldn't be the node that just passed
                             Optional<String> server = discoveredChunkServers.stream()
-                                    .filter(el -> !replicaNodes.contains(el))
+                                    .filter(el -> !replicaNodes.contains(el) &&  !el.equals(key))
                                     .findFirst();
 
                             /***
@@ -207,6 +217,13 @@ public class Controller implements Node {
                                 List <String> filteredReplicas = replicaNodes.stream()
                                         .filter(i -> !i.equals(key)).collect(Collectors.toList());
                                 String selectedServer = server.get();
+
+                                //if no replicas other than
+                                //the failed node, then recovery is not possible
+                                if (filteredReplicas.isEmpty()) {
+                                    System.out.println("Recovery not possible for chunk "+ chunk + " due to no available live replicas");
+                                    continue;
+                                }
                                 // Do something with selectedServer, such as initiate a repair operation
                                 System.out.println("Selected server for chunk " + chunk + ": " + selectedServer);
 
@@ -361,6 +378,7 @@ public class Controller implements Node {
      * TCP Cache
      */
     public static TCPConnection getTCPConnection(Map<String, TCPConnection> tcpCache, String chunkServerIp, int chunkServerPort) {
+
         TCPConnection conn = null;
         if (tcpCache.containsKey(chunkServerIp+ ":" + chunkServerPort)) {
             conn = tcpCache.get(chunkServerIp+ ":" + chunkServerPort);
