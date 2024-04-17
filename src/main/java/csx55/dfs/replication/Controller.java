@@ -28,6 +28,8 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class Controller implements Node {
+
+    private static String FAULT_TOLERANCE_MODE; //if nothing, then default mode is Replication
     /***
      * These are the maps maintained in the controller to track
      * various distributed statistics about the chunkServers
@@ -85,6 +87,11 @@ public class Controller implements Node {
     }
     private static ScheduledExecutorService heartbeatChecker = Executors.newSingleThreadScheduledExecutor();
     public static void main (String [] args) {
+        if (args.length == 2) {
+            FAULT_TOLERANCE_MODE = args[1];
+        }
+        System.out.println(FAULT_TOLERANCE_MODE);
+
         int controllerPort = args.length >= 1 ? Integer.parseInt(args[0]) : 12345;
         try  {
             ServerSocket serverSocket = new ServerSocket(controllerPort);

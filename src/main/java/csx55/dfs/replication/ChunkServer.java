@@ -33,6 +33,7 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class ChunkServer implements Node {
+    private static String FAULT_TOLERANCE_MODE;
     private static final Logger logger = Logger.getLogger(ChunkServer.class.getName());
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private String nodeIp;
@@ -67,6 +68,10 @@ public class ChunkServer implements Node {
     private List <String> previouslySyncedChunks = new ArrayList<>();
 
     public static void main(String[] args) {
+        //REED SOLOMON RECOVERY MODE
+        if (args.length == 3) {
+            FAULT_TOLERANCE_MODE = args[2];
+        }
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
              ServerSocket chunkServerSocket = new ServerSocket(0);
