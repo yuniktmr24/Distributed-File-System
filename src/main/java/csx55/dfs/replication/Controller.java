@@ -280,10 +280,11 @@ public class Controller implements Node {
     /***
      * Message acknowledgments when Controller is the receiver
      */
-    public void generateChunkServerRankingForClient (TCPConnection conn, int numChunks, List <String> chunkNames) {
-        List<List<String>> serversForChunks = FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())
-                ? ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap, FaultToleranceMode.RS)
-                : ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap);
+    public void generateChunkServerRankingForClient (TCPConnection conn, List <Long> chunkSizes, List <String> chunkNames) {
+        List<List<String>> serversForChunks = FAULT_TOLERANCE_MODE != null &&
+                FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())
+                ? ChunkServerRanker.rankChunkServersForChunks(chunkSizes, chunkServerAvailableSpaceMap, FaultToleranceMode.RS)
+                : ChunkServerRanker.rankChunkServersForChunks(chunkSizes, chunkServerAvailableSpaceMap);
 
         /***
          * Fill in the local chunk storage map

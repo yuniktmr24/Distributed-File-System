@@ -69,7 +69,7 @@ public class TCPReceiverThread implements Runnable {
                     else if (object instanceof Message) {
                         Message msg = (Message) object;
                         if (msg.getProtocol() == Protocol.CHUNK_SERVER_RANKING_REQUEST) {
-                            controller.generateChunkServerRankingForClient(connection, (Integer) msg.getPayload(), msg.getAdditionalPayload());
+                            controller.generateChunkServerRankingForClient(connection, (List <Long>) msg.getPayload(), msg.getAdditionalPayload());
                         }
                         else if (msg.getProtocol() == Protocol.REPLICA_LOCATION_REQUEST) {
                             controller.sendReplicaLocations(connection, msg);

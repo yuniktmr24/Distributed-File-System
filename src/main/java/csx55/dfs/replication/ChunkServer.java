@@ -84,10 +84,12 @@ public class ChunkServer implements Node {
             /* DEBUG helpers*/
              if (args.length == 1 && ChunkServerConfig.DEBUG_MODE) {
                  chunkServer.salt = Integer.parseInt(args[0]);
+                 System.out.println("The salt value for debug "+ chunkServer.salt);
              }
 
              if (args.length == 3 && ChunkServerConfig.DEBUG_MODE) {
                  chunkServer.salt = Integer.parseInt(args[2]);
+                 System.out.println("The salt value for debug "+ chunkServer.salt);
              }
 
             chunkServer.setServiceDiscovery(InetAddress.getLocalHost().getHostAddress(), chunkServerSocket.getLocalPort());

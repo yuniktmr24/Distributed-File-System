@@ -104,8 +104,10 @@ public class Client implements Node {
                                 FileChunker.chunkFile(uploadFilePath)
                                 : FileChunker.chunkFile(uploadFilePath, fileUploadDest);
                         System.out.println("Total chunks created: " + chunks.size());
+                        List <Long> chunkSizes = new ArrayList<>();
                         for (ChunkWrapper chunk : chunks) {
                             System.out.println("Chunk " + chunk.getChunkName() + " size: " + chunk.getData().length + " bytes");
+                            chunkSizes.add((long) chunk.getData().length);
                         }
                         /***
                          * Cool. chunks have been created. Now let us contact the controller to
@@ -113,7 +115,7 @@ public class Client implements Node {
                          */
                         List <String> chunkNames = chunks.stream().map(ChunkWrapper::getChunkName).collect(Collectors.toList());
 
-                        Message rankingMsg = new Message(Protocol.CHUNK_SERVER_RANKING_REQUEST, chunks.size(), chunkNames);
+                        Message rankingMsg = new Message(Protocol.CHUNK_SERVER_RANKING_REQUEST, chunkSizes, chunkNames);
                         controllerConnection.getSenderThread().sendData(rankingMsg);
 
                     } catch (IOException e) {
