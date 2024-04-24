@@ -2,6 +2,7 @@ package csx55.dfs.replication;
 
 import csx55.dfs.config.ChunkServerConfig;
 import csx55.dfs.domain.ChunkMetaData;
+import csx55.dfs.domain.FaultToleranceMode;
 import csx55.dfs.domain.Node;
 import csx55.dfs.domain.Protocol;
 import csx55.dfs.payload.*;
@@ -71,6 +72,8 @@ public class ChunkServer implements Node {
         //REED SOLOMON RECOVERY MODE
         if (args.length == 3) {
             FAULT_TOLERANCE_MODE = args[2];
+            //assuming Reed-Solomon mode is the only mode specified via cmd line
+            FAULT_TOLERANCE_MODE = FaultToleranceMode.RS.getMode();
         }
         //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
          try (Socket socketToController = new Socket("localhost", 12345);
@@ -78,8 +81,13 @@ public class ChunkServer implements Node {
         ) {
             ChunkServer chunkServer = new ChunkServer();
 
+            /* DEBUG helpers*/
              if (args.length == 1 && ChunkServerConfig.DEBUG_MODE) {
                  chunkServer.salt = Integer.parseInt(args[0]);
+             }
+
+             if (args.length == 3 && ChunkServerConfig.DEBUG_MODE) {
+                 chunkServer.salt = Integer.parseInt(args[2]);
              }
 
             chunkServer.setServiceDiscovery(InetAddress.getLocalHost().getHostAddress(), chunkServerSocket.getLocalPort());

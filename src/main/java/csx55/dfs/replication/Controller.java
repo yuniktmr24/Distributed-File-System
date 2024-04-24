@@ -1,10 +1,7 @@
 package csx55.dfs.replication;
 
 import csx55.dfs.config.ControllerConfig;
-import csx55.dfs.domain.ChunkMetaData;
-import csx55.dfs.domain.ChunkServerInfo;
-import csx55.dfs.domain.Node;
-import csx55.dfs.domain.Protocol;
+import csx55.dfs.domain.*;
 import csx55.dfs.payload.ChunkLocationPayload;
 import csx55.dfs.payload.MajorHeartBeat;
 import csx55.dfs.payload.Message;
@@ -89,6 +86,7 @@ public class Controller implements Node {
     public static void main (String [] args) {
         if (args.length == 2) {
             FAULT_TOLERANCE_MODE = args[1];
+            FAULT_TOLERANCE_MODE = FaultToleranceMode.RS.getMode();
         }
         System.out.println(FAULT_TOLERANCE_MODE);
 
@@ -120,10 +118,10 @@ public class Controller implements Node {
             chunkServerAvailableSpaceMap.put(majorHb.getHeartBeatOrigin(), majorHb.getFreeSpaceAvailable());
         }
         //printSpaceAvailableMapElement(chunkServerAvailableSpaceMap);
-        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
-        for (int i = 0; i < serversForChunks.size(); i++) {
-            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
-        }
+//        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
+//        for (int i = 0; i < serversForChunks.size(); i++) {
+//            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
+//        }
     }
 
     public synchronized void receiveMinorHeartBeat(MinorHeartBeat minorHb) {
@@ -145,10 +143,10 @@ public class Controller implements Node {
             chunkServerAvailableSpaceMap.put(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
         }
         //printSpaceAvailableMapElement(chunkServerAvailableSpaceMap);
-        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
-        for (int i = 0; i < serversForChunks.size(); i++) {
-            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
-        }
+//        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(ControllerConfig.NUM_CHUNKS, chunkServerAvailableSpaceMap);
+//        for (int i = 0; i < serversForChunks.size(); i++) {
+//            System.out.println("Chunk " + (i + 1) + " servers: " + serversForChunks.get(i));
+//        }
     }
 
     private static void setupHeartbeatChecker() {
@@ -283,7 +281,9 @@ public class Controller implements Node {
      * Message acknowledgments when Controller is the receiver
      */
     public void generateChunkServerRankingForClient (TCPConnection conn, int numChunks, List <String> chunkNames) {
-        List<List<String>> serversForChunks = ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap);
+        List<List<String>> serversForChunks = FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())
+                ? ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap, FaultToleranceMode.RS)
+                : ChunkServerRanker.rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap);
 
         /***
          * Fill in the local chunk storage map

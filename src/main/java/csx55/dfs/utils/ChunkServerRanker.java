@@ -1,5 +1,8 @@
 package csx55.dfs.utils;
 
+import csx55.dfs.config.ControllerConfig;
+import csx55.dfs.domain.FaultToleranceMode;
+
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -30,15 +33,19 @@ public class ChunkServerRanker {
      * @return a list of lists, where each inner list contains the top three server IDs for each chunk
      */
     public static List<List<String>> rankChunkServersForChunks(int numChunks, Map<String, Long> chunkServerAvailableSpaceMap) {
+        return rankChunkServersForChunks(numChunks, chunkServerAvailableSpaceMap, FaultToleranceMode.REPLICATION);
+    }
+
+    public static List<List<String>> rankChunkServersForChunks(int numChunks, Map<String, Long> chunkServerAvailableSpaceMap, FaultToleranceMode mode) {
         List<List<String>> serverAssignmentsForChunks = new ArrayList<>();
         List<Map.Entry<String, Long>> sortedServers = new ArrayList<>(chunkServerAvailableSpaceMap.entrySet());
 
         // Sort servers by available space in descending order
         sortedServers.sort(Map.Entry.<String, Long>comparingByValue().reversed());
 
-        // Collect top 3 servers based on available space
+        // Collect top 3 replica servers based on available space or 1 server if Reed solomon
         List<String> topServers = sortedServers.stream()
-                .limit(3)
+                .limit(mode.equals(FaultToleranceMode.REPLICATION) ? ControllerConfig.NUM_CHUNKS : 1)
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
