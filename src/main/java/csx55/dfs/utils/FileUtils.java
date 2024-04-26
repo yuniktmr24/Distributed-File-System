@@ -63,6 +63,33 @@ public class FileUtils {
         return fileList;
     }
 
+    public static List <Path> getShardsWithExtension(String ip, Integer port) {
+        return getShardsWithExtension(ip + "-" + port);
+    }
+
+    public static List<Path> getShardsWithExtension(String pathAddendum) {
+        Path rootPath = Paths.get(ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY
+                + (pathAddendum.isEmpty() ? "" : "/" + pathAddendum));
+        if (!Files.exists(rootPath)) {
+            try {
+                Files.createDirectories(rootPath);
+                System.out.println("Directory created: " + rootPath);
+            } catch (IOException e) {
+                System.err.println("Failed to create directory: " + e.getMessage());
+                return new ArrayList<>(); // Return empty list if unable to create directory
+            }
+        }
+        List<Path> fileList = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(rootPath)) {
+            fileList = walk.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().contains(ChunkServerConfig.SHARD_EXT))
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            System.err.println("Error reading files: " + e.getMessage());
+        }
+        return fileList;
+    }
+
     private static long calculateTotalSize(List<Path> files) {
         long totalSize = 0;
         for (Path file : files) {

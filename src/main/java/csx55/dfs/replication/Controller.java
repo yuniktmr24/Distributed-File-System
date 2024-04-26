@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 
 public class Controller implements Node {
 
-    private static String FAULT_TOLERANCE_MODE; //if nothing, then default mode is Replication
+    private static String FAULT_TOLERANCE_MODE = FaultToleranceMode.REPLICATION.getMode(); //if nothing, then default mode is Replication
     /***
      * These are the maps maintained in the controller to track
      * various distributed statistics about the chunkServers
@@ -53,9 +53,13 @@ public class Controller implements Node {
      */
     private static Map <String, List <String>> chunkServerInfoMap; //list of chunks a chunkServer maintains
 
+    private static Map <String, List <String>> chunkServerShardsInfoMap;
+
     private static Map <String, List <ChunkMetaData>> chunkMetaDataMap;
 
     private static Map <String, List <String>> chunkStorageMap;
+
+    private static Map <String, List <String>> shardStorageMap;
 
     private static Map <String, Long> chunkServerAvailableSpaceMap;
 
@@ -63,8 +67,10 @@ public class Controller implements Node {
 
     static {
         chunkServerInfoMap = new ConcurrentHashMap<>();
+        chunkServerShardsInfoMap = new ConcurrentHashMap<>();
         chunkMetaDataMap = new ConcurrentHashMap<>();
         chunkStorageMap = new ConcurrentHashMap<>();
+        shardStorageMap = new ConcurrentHashMap<>();
         chunkServerAvailableSpaceMap = new ConcurrentHashMap<>();
         lastHeartbeatReceived = new ConcurrentHashMap<>();
     }
@@ -105,6 +111,7 @@ public class Controller implements Node {
     public synchronized void receiveMajorHeartBeat (MajorHeartBeat majorHb) {
         discoveredChunkServers.add(majorHb.getHeartBeatOrigin());
         chunkServerInfoMap.put(majorHb.getHeartBeatOrigin(), majorHb.getAllChunkFiles());
+        chunkServerShardsInfoMap.put(majorHb.getHeartBeatOrigin(), majorHb.getAllShards());
 
         LocalDateTime now = LocalDateTime.now();
         logger.log(Level.INFO, "Received major heart beat at: {0}", formatter.format(now));
@@ -134,6 +141,12 @@ public class Controller implements Node {
         }
         else {
             chunkServerInfoMap.put(minorHb.getHeartBeatOrigin(), minorHb.getNewChunkFiles());
+        }
+        if (chunkServerShardsInfoMap.containsKey(minorHb.getHeartBeatOrigin())) {
+            chunkServerShardsInfoMap.get(minorHb.getHeartBeatOrigin()).addAll(minorHb.getNewShards());
+        }
+        else {
+            chunkServerShardsInfoMap.put(minorHb.getHeartBeatOrigin(), minorHb.getNewShards());
         }
 
         if (chunkServerAvailableSpaceMap.containsKey(minorHb.getHeartBeatOrigin())) {

@@ -11,6 +11,8 @@ public class MinorHeartBeat extends HeartBeat implements Serializable {
      * New chunk files since last minor heartbeat
      */
     private List<String> newChunkFiles = new ArrayList<>();
+
+    private List<String> newShards = new ArrayList<>();
     public MinorHeartBeat(String origin, int totalNumberOfChunks, long freeSpaceAvailable) {
         super(origin, totalNumberOfChunks, freeSpaceAvailable);
     }
@@ -21,5 +23,13 @@ public class MinorHeartBeat extends HeartBeat implements Serializable {
 
     public void setNewChunkFiles(List<String> newChunkFiles) {
         this.newChunkFiles = newChunkFiles;
+    }
+
+    public List<String> getNewShards() {
+        return newShards;
+    }
+
+    public void setNewShards(List<String> newShards) {
+        this.newShards = newShards;
     }
 }

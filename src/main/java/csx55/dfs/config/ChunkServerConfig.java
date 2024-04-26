@@ -11,5 +11,9 @@ public class ChunkServerConfig {
 
     public static final String CHUNK_STORAGE_EXT = "chunk";
 
+    public static final String SHARD_EXT = "shard";
+
+    public static final String SHARD_STORAGE_BASE = "shards";
+
     public static final boolean DEBUG_MODE = true;
 }

@@ -67,10 +67,11 @@ public class ChunkServer implements Node {
      * Chunks which were part of the previous minor/major heartbeat sync
      */
     private List <String> previouslySyncedChunks = new ArrayList<>();
+    private List <String> previouslySyncedShards = new ArrayList<>();
 
     public static void main(String[] args) {
         //REED SOLOMON RECOVERY MODE
-        if (args.length == 3) {
+        if (args.length == 4) {
             FAULT_TOLERANCE_MODE = args[2];
             //assuming Reed-Solomon mode is the only mode specified via cmd line
             FAULT_TOLERANCE_MODE = FaultToleranceMode.RS.getMode();
@@ -87,8 +88,8 @@ public class ChunkServer implements Node {
                  System.out.println("The salt value for debug "+ chunkServer.salt);
              }
 
-             if (args.length == 3 && ChunkServerConfig.DEBUG_MODE) {
-                 chunkServer.salt = Integer.parseInt(args[2]);
+             if (args.length == 4 && ChunkServerConfig.DEBUG_MODE) {
+                 chunkServer.salt = Integer.parseInt(args[3]);
                  System.out.println("The salt value for debug "+ chunkServer.salt);
              }
 
@@ -163,6 +164,30 @@ public class ChunkServer implements Node {
 
         minorHB.setNewChunkFiles(new ArrayList<>(currentFileSet));
 
+        /***
+         * Do the same as above with shard files
+         */
+        if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+            List<Path> shardPaths = ChunkServerConfig.DEBUG_MODE ? FileUtils.getShardsWithExtension(nodeIp, salt) : FileUtils.getShardsWithExtension("");
+            //fully qualified names - including path info
+            List<String> currentShardNames = shardPaths.stream()
+                    .map(Path::toString)
+                    .map(el -> el.replace(this.fileStorageDirectory, ""))
+                    .collect(Collectors.toList());
+
+            Set<String> previouslySyncedShardsSet = new HashSet<>(previouslySyncedShards);
+            Set<String> currentShardSet = new HashSet<>(currentShardNames);
+
+            currentShardSet.removeAll(previouslySyncedShardsSet);
+            System.out.println("New shards since last sync: " + currentShardSet);
+
+            List<String> newShards = new ArrayList<>(currentShardSet);
+
+            minorHB.setNewShards(new ArrayList<>(currentShardSet));
+            // Add new shards to the previously synced shards list
+            previouslySyncedShards.addAll(newShards);
+        }
+
         try {
             this.controllerConnection.getSenderThread().sendData(minorHB);
         } catch (InterruptedException e) {
@@ -186,6 +211,18 @@ public class ChunkServer implements Node {
                 .map(Path::toString)
                 .map(el -> el.replace(this.fileStorageDirectory, ""))
                 .collect(Collectors.toList());
+
+        if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+            List<Path> shardFilePaths = ChunkServerConfig.DEBUG_MODE ? FileUtils.getShardsWithExtension(nodeIp, salt) : FileUtils.getShardsWithExtension("");
+            //fully qualified names - including path info
+            List<String> shardNames = shardFilePaths.stream()
+                    .map(Path::toString)
+                    .map(el -> el.replace(this.fileStorageDirectory, ""))
+                    .collect(Collectors.toList());
+            previouslySyncedShards = shardNames;
+            majorHB.setAllShards(shardNames);
+        }
+
         previouslySyncedChunks = chunkFileNames;
         majorHB.setAllChunkFiles(chunkFileNames);
 
