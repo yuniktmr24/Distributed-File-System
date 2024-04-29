@@ -9,6 +9,7 @@ import csx55.dfs.payload.MinorHeartBeat;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
 import csx55.dfs.utils.ChunkServerRanker;
+import csx55.dfs.utils.ChunkShardMapper;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -148,6 +149,7 @@ public class Controller implements Node {
         else {
             chunkServerShardsInfoMap.put(minorHb.getHeartBeatOrigin(), minorHb.getNewShards());
         }
+        printShardMapElement();
 
         if (chunkServerAvailableSpaceMap.containsKey(minorHb.getHeartBeatOrigin())) {
             chunkServerAvailableSpaceMap.replace(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
@@ -236,36 +238,57 @@ public class Controller implements Node {
                                         .filter(i -> !i.equals(key)).collect(Collectors.toList());
                                 String selectedServer = server.get();
 
-                                //if no replicas other than
-                                //the failed node, then recovery is not possible
-                                if (filteredReplicas.isEmpty()) {
-                                    System.out.println("Recovery not possible for chunk "+ chunk + " due to no available live replicas");
-                                    continue;
-                                }
-                                // Do something with selectedServer, such as initiate a repair operation
-                                System.out.println("Selected server for chunk " + chunk + ": " + selectedServer);
+                                if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.REPLICATION.getMode())) {
+                                    //if no replicas other than
+                                    //the failed node, then recovery is not possible
+                                    if (filteredReplicas.isEmpty()) {
+                                        System.out.println("Recovery not possible for chunk " + chunk + " due to no available live replicas");
+                                        continue;
+                                    }
+                                    // Do something with selectedServer, such as initiate a repair operation
+                                    System.out.println("Selected server for chunk " + chunk + ": " + selectedServer);
 
-                                TCPConnection connectionToBackup = getTCPConnection(tcpCache,
-                                        selectedServer.split(":")[0],
-                                        Integer.parseInt(selectedServer.split(":")[1]));
+                                    TCPConnection connectionToBackup = getTCPConnection(tcpCache,
+                                            selectedServer.split(":")[0],
+                                            Integer.parseInt(selectedServer.split(":")[1]));
 
-                                Message recoveryMsg = new Message(Protocol.RECOVER_REPLICA, chunk, filteredReplicas);
-                                try {
-                                    connectionToBackup.getSenderThread().sendData(recoveryMsg);
-                                } catch (InterruptedException e) {
-                                    e.printStackTrace();
-                                    throw new RuntimeException(e);
-                                }
-                                //add newly appointed replica holder to the storage Map
-                                if (chunkStorageMap.get(chunk) != null) {
-                                    chunkStorageMap.get(chunk).add(selectedServer);
+                                    Message recoveryMsg = new Message(Protocol.RECOVER_REPLICA, chunk, filteredReplicas);
+                                    try {
+                                        connectionToBackup.getSenderThread().sendData(recoveryMsg);
+                                    } catch (InterruptedException e) {
+                                        e.printStackTrace();
+                                        throw new RuntimeException(e);
+                                    }
+                                    //add newly appointed replica holder to the storage Map
+                                    if (chunkStorageMap.get(chunk) != null) {
+                                        chunkStorageMap.get(chunk).add(selectedServer);
+                                    } else {
+                                        //chunkStorageMap empty as in no uploads
+                                        //only archived chunk files scenario
+                                        List<String> location = new ArrayList<>();
+                                        location.add(selectedServer);
+                                        chunkStorageMap.put(chunk, location);
+                                    }
                                 }
                                 else {
-                                    //chunkStorageMap empty as in no uploads
-                                    //only archived chunk files scenario
-                                    List <String> location = new ArrayList<>();
-                                    location.add(selectedServer);
-                                    chunkStorageMap.put(chunk, location);
+                                    System.out.println("Reed solomon recovery initiated. Selected sever "+ selectedServer
+                                    + " Lost chunk "+ chunk);
+                                    /***
+                                     * Info map about where shards of a given chunk is stored
+                                     */
+                                    TCPConnection connectionToBackup = getTCPConnection(tcpCache,
+                                            selectedServer.split(":")[0],
+                                            Integer.parseInt(selectedServer.split(":")[1]));
+
+                                    Map <String, List <String>> shardMapForChunk = ChunkShardMapper.getShardLocations(chunk, shardStorageMap);
+
+                                    Message recoveryMsg = new Message(Protocol.RECOVER_SHARDS, shardMapForChunk);
+                                    try {
+                                        connectionToBackup.getSenderThread().sendData(recoveryMsg);
+                                    } catch (InterruptedException e) {
+                                        e.printStackTrace();
+                                        throw new RuntimeException(e);
+                                    }
                                 }
 
                             } else {
@@ -287,6 +310,18 @@ public class Controller implements Node {
         for (Map.Entry<String, Long> entry: chunkServerAvailableSpaceMap.entrySet()) {
             System.out.println(entry.getKey() + " : " + entry.getValue());
         }
+    }
+
+    private void printShardMapElement () {
+        System.out.println("Chunk Server to Shards info map ");
+        for (Map.Entry<String, List <String>> entry: chunkServerShardsInfoMap.entrySet()) {
+            System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
+        System.out.println("Shards to chunk server info map ");
+        for (Map.Entry<String, List <String>> entry: shardStorageMap.entrySet()) {
+            System.out.println(entry.getKey() + " : " + entry.getValue());
+        }
+
     }
 
 
@@ -391,6 +426,43 @@ public class Controller implements Node {
 
         // Alternatively, handle the list of nodes as needed by your application logic
         System.out.println("Pristine replicas are located at: " + nodesWithPristineReplica);
+
+    }
+
+    /***
+     * Send location of shard storage servers to the requesting chunk Server
+     */
+    public synchronized void sendShardStorageLocations (TCPConnection conn, Message msg) {
+        //9 because we have 9 shards to be dispersed
+        try {
+            List<List<String>> shardStorageServers = ChunkServerRanker.rankChunkServersForChunks(9, chunkServerAvailableSpaceMap,
+                    FaultToleranceMode.RS, (String) msg.getPayload());
+
+            /***
+             * Fill in the local chunk storage map
+             * In the future, when client requests download for a file
+             * we can use this map to assemble the chunks and then send
+             * the whole file to client.
+             */
+            List<String> shardNames = msg.getAdditionalPayload();
+            for (int i = 0; i < shardNames.size(); i++) {
+                String shardName = shardNames.get(i);
+                //replica servers where this chunk and its replicas are stored
+                List<String> replicaServers = shardStorageServers.get(i);
+                shardStorageMap.put(shardName, replicaServers);
+            }
+
+            try {
+                Message rankingResponse = new Message(Protocol.SHARD_STORAGE_RANKING_RESPONSE, shardStorageServers, shardNames);
+                conn.getSenderThread().sendData(rankingResponse);
+                System.out.println("Sent shard storage locations to chunkServer "+ conn.getSocket().getPort());
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        catch (Exception ex) {
+            ex.printStackTrace();
+        }
 
     }
 

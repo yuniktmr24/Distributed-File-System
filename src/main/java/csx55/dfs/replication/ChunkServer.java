@@ -8,9 +8,7 @@ import csx55.dfs.domain.Protocol;
 import csx55.dfs.payload.*;
 import csx55.dfs.transport.TCPConnection;
 import csx55.dfs.transport.TCPServerThread;
-import csx55.dfs.utils.ChunkWrapper;
-import csx55.dfs.utils.FileChecksumCalculator;
-import csx55.dfs.utils.FileUtils;
+import csx55.dfs.utils.*;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -34,7 +32,7 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 public class ChunkServer implements Node {
-    private static String FAULT_TOLERANCE_MODE;
+    private static String FAULT_TOLERANCE_MODE = FaultToleranceMode.REPLICATION.getMode();;
     private static final Logger logger = Logger.getLogger(ChunkServer.class.getName());
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private String nodeIp;
@@ -68,6 +66,12 @@ public class ChunkServer implements Node {
      */
     private List <String> previouslySyncedChunks = new ArrayList<>();
     private List <String> previouslySyncedShards = new ArrayList<>();
+
+    private List <String> chunksWithShards = new ArrayList<>();
+
+    private Map <String, ShardWrapper> shardWrapperMap = new ConcurrentHashMap<>();
+
+    private CountDownLatch shardsReceived;
 
     public static void main(String[] args) {
         //REED SOLOMON RECOVERY MODE
@@ -163,6 +167,9 @@ public class ChunkServer implements Node {
         List<String> newChunks = new ArrayList<>(currentFileSet);
 
         minorHB.setNewChunkFiles(new ArrayList<>(currentFileSet));
+        // Add new chunks to the previously synced chunks list
+        previouslySyncedChunks.addAll(newChunks);
+
 
         /***
          * Do the same as above with shard files
@@ -187,14 +194,70 @@ public class ChunkServer implements Node {
             // Add new shards to the previously synced shards list
             previouslySyncedShards.addAll(newShards);
         }
-
         try {
             this.controllerConnection.getSenderThread().sendData(minorHB);
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        // Add new chunks to the previously synced chunks list
-        previouslySyncedChunks.addAll(newChunks);
+
+        if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+            for (Path chunkPath : chunkFilePaths) {
+                String chunkName = chunkPath.toString().replace(this.fileStorageDirectory, "");
+
+                /***
+                 * If chunk doesn't have shards generated then, well let us generate the shards. Only in Reed solomon
+                 */
+                List<ShardWrapper> generatedShards = new ArrayList<>();
+                if (!chunksWithShards.contains(chunkName) && !shardWrapperMap.keySet().stream() // Create a stream of the keys
+                        .anyMatch(key -> key.contains(chunkName))) {
+                    generatedShards = generateShards(chunkPath);
+
+                    List<String> generatedShardNames = generatedShards.stream().map(ShardWrapper::getShardName)
+                            .collect(Collectors.toList());
+
+                    for (ShardWrapper shard : generatedShards) {
+                        shardWrapperMap.put(shard.getShardName(), shard);
+                    }
+
+                    /***
+                     * After generating the shards, let us contact the controller node to get
+                     * the shard storage nodes locations
+                     */
+                    Message shardStorageLocationReqMsg = new Message(Protocol.SHARD_STORAGE_RANKING_REQUEST, this.descriptor
+                            , generatedShardNames);
+
+                    try {
+                        this.controllerConnection.getSenderThread().sendData(shardStorageLocationReqMsg);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        }
+    }
+
+    /***
+     * Generate shards for a given file given its path
+     * @param path
+     */
+    private List <ShardWrapper> generateShards (Path path) {
+        List <ShardWrapper> shards = new ArrayList<>();
+        try {
+            byte[] data = Files.readAllBytes(path);
+            String chunkName = path.toString().replace(this.fileStorageDirectory, "");
+            String chunkFilePath = path.toString();
+
+            ChunkWrapper wrapper = new ChunkWrapper(data, chunkName, chunkFilePath);
+            shards = ReedSolomonFileEncoder.encodeShards(wrapper);
+
+            chunksWithShards.add(chunkName);
+        } catch (IOException e) {
+            System.err.println("Error reading file: " + path);
+            e.printStackTrace();
+            // Depending on your requirements, you may want to handle the error differently
+            // For example, you could return null or throw a custom exception
+        }
+        return shards;
     }
 
     private void sendMajorHeartBeat() {
@@ -408,7 +471,7 @@ public class ChunkServer implements Node {
      * Message acknowledgments when ChunkServer is the receiver
      */
     public synchronized void receiveChunks (ChunkPayload chunkPayload) {
-        System.out.println("Received chunk "+ chunkPayload.getChunkWrapper().getChunkName());
+        System.out.println("Received chunk " + chunkPayload.getChunkWrapper().getChunkName());
 
         /***
          * First persist the chunk here locally and
@@ -443,8 +506,45 @@ public class ChunkServer implements Node {
          * Calculate the checksum for newly uploaded file
          */
         verifyCheckSumsAndInitiateRepair();
-    }
 
+        if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+
+            /***
+             * If Reed solomon we also generate the shards
+             */
+            List<ShardWrapper> generatedShards = new ArrayList<>();
+            if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+                generatedShards = ReedSolomonFileEncoder.encodeShards(chunkPayload.getChunkWrapper());
+            }
+            /***
+             * Now contact controller for a list of shard storage servers: todo
+             */
+            if (!chunksWithShards.contains(chunkPayload.getChunkWrapper().getChunkName())) {
+                List<String> generatedShardNames = generatedShards.stream().map(ShardWrapper::getShardName)
+                        .collect(Collectors.toList());
+
+                for (ShardWrapper shard : generatedShards) {
+                    shardWrapperMap.put(shard.getShardName(), shard);
+                }
+
+                /***
+                 * After generating the shards, let us contact the controller node to get
+                 * the shard storage nodes locations
+                 */
+                Message shardStorageLocationReqMsg = new Message(Protocol.SHARD_STORAGE_RANKING_REQUEST, this.descriptor
+                        , generatedShardNames);
+                System.out.println("Requested rankings for "+ generatedShardNames);
+
+                try {
+                    this.controllerConnection.getSenderThread().sendData(shardStorageLocationReqMsg);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+
+                chunksWithShards.add(chunkPayload.getChunkWrapper().getChunkName());
+            }
+        }
+    }
     /***
      * Received chunkwrapper from possibly a fellow chunk server holding a replica
      * during recovery via replication
@@ -620,6 +720,125 @@ public class ChunkServer implements Node {
             throw new RuntimeException(e);
         }
 
+    }
+
+    /***
+     * Receive shard storage server locations from controller
+     */
+    public void receiveShardStorageLocations (TCPConnection conn, Message message) {
+        System.out.println("Received Shard storage locations ");
+        List <List<String>> shardStorageServers = (List<List<String>>) message.getPayload();
+        List <String> shardNames = message.getAdditionalPayload();
+
+        int idx = 0;
+        /***
+         * Now send to target shard storage servers for persistence
+         */
+        for (List <String> server: shardStorageServers) {
+            String targetServer = server.get(0); //target server for a shard (only 1)
+
+            TCPConnection connPeer = getTCPConnection(tcpCache, targetServer.split(":")[0],
+                    Integer.parseInt(targetServer.split(":")[1]));
+            try {
+                connPeer.getSenderThread().sendData(shardWrapperMap.get(shardNames.get(idx)));
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            idx++;
+        }
+    }
+
+    /***
+     * Persist incoming shards
+     */
+    public void persistShard(TCPConnection conn, ShardWrapper shard) {
+        System.out.println("Received shard " + shard.getShardName());
+        shardWrapperMap.put(shard.getShardName(), shard);
+
+        /***
+         * First persist the chunk here locally and
+         * then check the replicationPath and propagate the chunk to the other replicas
+         * until we reach the terminal node.
+         */
+        FileUtils.storeShard(shard, this.fileStorageDirectory + "/" + ChunkServerConfig.SHARD_STORAGE_BASE);
+        if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+            if (shardsReceived != null) {
+                shardsReceived.countDown();
+            }
+        }
+    }
+
+
+    /***
+     * Controller initiated recovering via erasure coding through shard recover.
+     * This targetServer looks at the shardMap and sends requests for the shards for the lost chunks
+     *
+     * @param conn
+     * @param msg
+     */
+    public void recoverShards (TCPConnection conn, Message msg) {
+        System.out.println("Recovering shards in backup server");
+
+        Map <String, List<String>> shardLocations = (Map<String, List<String>>) msg.getPayload();
+
+
+        shardsReceived = new CountDownLatch(shardLocations.size());
+        for (Map.Entry<String, List <String>> shardInfo: shardLocations.entrySet()) {
+            String targetNode = shardInfo.getValue().get(0);
+            String shardName = shardInfo.getKey();
+
+            if (targetNode.equals(this.descriptor)) {
+                System.out.println("Self has shard. No need for TCP request. Continue to next shard");
+                shardsReceived.countDown();
+                continue;
+            }
+            TCPConnection connToTarget = getTCPConnection(tcpCache, targetNode.split(":")[0],
+                    Integer.parseInt(targetNode.split(":")[1]));
+            Message shardReq = new Message(Protocol.REQUEST_SHARD, shardName);
+
+            try {
+                connToTarget.getSenderThread().sendData(shardReq);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        //wait for receipt of all shards
+        try {
+            shardsReceived.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        //now reconstruct the chunks from shard
+        System.out.println("All shards received. Now reconstructing chunk from shards");
+        Set<String> chunkNames = new HashSet<>();
+
+        for (String shardPath : shardLocations.keySet()) {
+            // Assuming the chunk name is always followed by "_shard"
+            int index = shardPath.indexOf("_shard");
+            if (index != -1) {
+                String chunkName = shardPath.substring(0, index);
+                chunkNames.add(chunkName);
+            }
+        }
+        ReedSolomonFileDecoder.reconstructFileFromShards(new ArrayList<>(chunkNames), this.fileStorageDirectory
+                + "/" + ChunkServerConfig.SHARD_STORAGE_BASE, this.fileStorageDirectory);
+        System.out.println("Reconstruction of lost chunk done");
+    }
+
+    /***
+     * Send shard to server requesting shard. Typically part of recovery via erasure coding
+     * @param conn
+     * @param msg
+     */
+    public void sendShards (TCPConnection conn, Message msg) {
+        String shardName = (String) msg.getPayload();
+        ShardWrapper shard = shardWrapperMap.get(shardName);
+
+        try {
+            conn.getSenderThread().sendData(shard);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
 

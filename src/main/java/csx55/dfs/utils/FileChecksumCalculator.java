@@ -77,7 +77,8 @@ public class FileChecksumCalculator {
         try {
             List<Path> files = Files.walk(rootDirectory)
                     .filter(Files::isRegularFile)
-                    .filter(path -> path.toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT))
+                    .filter(path -> path.toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT)
+                            && !path.getFileName().toString().contains(ChunkServerConfig.SHARD_EXT))
                     .collect(Collectors.toList());
 
             for (Path file : files) {

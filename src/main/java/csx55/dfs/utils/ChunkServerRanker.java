@@ -61,6 +61,29 @@ public class ChunkServerRanker {
         return serverAssignmentsForChunks;
     }
 
+    public static List<List<String>> rankChunkServersForChunks(int numChunks, Map<String, Long> chunkServerAvailableSpaceMap, FaultToleranceMode mode, String excludedServer) {
+        List<List<String>> serverAssignmentsForChunks = new ArrayList<>();
+        List<Map.Entry<String, Long>> sortedServers = new ArrayList<>(chunkServerAvailableSpaceMap.entrySet());
+
+        // Sort servers by available space in descending order
+        sortedServers.sort(Map.Entry.<String, Long>comparingByValue().reversed());
+
+        // Collect top 3 replica servers based on available space or 1 server if Reed solomon
+        List<String> topServers = sortedServers.stream()
+                .limit(mode.equals(FaultToleranceMode.REPLICATION) ? ControllerConfig.NUM_CHUNKS : 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+        topServers.removeIf(el -> el.equals(excludedServer));
+
+        // Assign these top servers to each chunk
+        for (int chunkIndex = 0; chunkIndex < numChunks; chunkIndex++) {
+            serverAssignmentsForChunks.add(new ArrayList<>(topServers));
+        }
+
+        return serverAssignmentsForChunks;
+    }
+
+
     public static List<List<String>> rankChunkServersForChunks(List<Long> chunkSizes, Map<String, Long> chunkServerAvailableSpaceMap, FaultToleranceMode mode) {
         List<List<String>> serverAssignmentsForChunks = new ArrayList<>();
 
