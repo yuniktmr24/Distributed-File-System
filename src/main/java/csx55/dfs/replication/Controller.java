@@ -90,6 +90,8 @@ public class Controller implements Node {
         return instance;
     }
     private static ScheduledExecutorService heartbeatChecker = Executors.newSingleThreadScheduledExecutor();
+
+    private static List <String> shardStorageOnlyServers = new ArrayList<>();
     public static void main (String [] args) {
         if (args.length == 2) {
             FAULT_TOLERANCE_MODE = args[1];
@@ -149,7 +151,7 @@ public class Controller implements Node {
         else {
             chunkServerShardsInfoMap.put(minorHb.getHeartBeatOrigin(), minorHb.getNewShards());
         }
-        printShardMapElement();
+        //printShardMapElement();
 
         if (chunkServerAvailableSpaceMap.containsKey(minorHb.getHeartBeatOrigin())) {
             chunkServerAvailableSpaceMap.replace(minorHb.getHeartBeatOrigin(), minorHb.getFreeSpaceAvailable());
@@ -228,6 +230,14 @@ public class Controller implements Node {
                             Optional<String> server = discoveredChunkServers.stream()
                                     .filter(el -> !replicaNodes.contains(el) &&  !el.equals(key))
                                     .findFirst();
+                            if (FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())) {
+                                //don't use shardStorageOnlyServers as chunk backup
+                                server = discoveredChunkServers.stream()
+                                        .filter(el -> !replicaNodes.contains(el)
+                                                &&  !el.equals(key)
+                                                && !shardStorageOnlyServers.contains(el))
+                                        .findFirst();
+                            }
 
                             /***
                              * Let's initiate recovery at newly appointed backup node
@@ -289,6 +299,8 @@ public class Controller implements Node {
                                         e.printStackTrace();
                                         throw new RuntimeException(e);
                                     }
+                                    //this new elected server now contains the chunk
+                                    chunkStorageMap.put(chunk, Collections.singletonList(selectedServer));
                                 }
 
                             } else {
@@ -329,6 +341,25 @@ public class Controller implements Node {
      * Message acknowledgments when Controller is the receiver
      */
     public void generateChunkServerRankingForClient (TCPConnection conn, List <Long> chunkSizes, List <String> chunkNames) {
+        if (FAULT_TOLERANCE_MODE != null &&
+                FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())
+                && shardStorageOnlyServers.isEmpty()) {
+            int k = ControllerConfig.K_SHARD_STORAGE_SERVERS; // number of servers you want to select
+            List<String> servers = new ArrayList<>(chunkServerAvailableSpaceMap.keySet());
+
+            Collections.shuffle(servers); // Randomize the order of servers
+
+            // Ensure k does not exceed the number of available servers
+            int numberToSelect = Math.min(k, servers.size());
+
+            for (int i = 0; i < numberToSelect; i++) {
+                shardStorageOnlyServers.add(servers.get(i));
+                //remove the shard storage server from chunkServerAvailableSpaceMap list
+                chunkServerAvailableSpaceMap.remove(servers.get(i));
+                System.out.println(servers.get(i) + " designated as shard storage server where distribution k = "+ ControllerConfig.K_SHARD_STORAGE_SERVERS);
+            }
+        }
+
         List<List<String>> serversForChunks = FAULT_TOLERANCE_MODE != null &&
                 FAULT_TOLERANCE_MODE.equals(FaultToleranceMode.RS.getMode())
                 ? ChunkServerRanker.rankChunkServersForChunks(chunkSizes, chunkServerAvailableSpaceMap, FaultToleranceMode.RS)
@@ -435,9 +466,16 @@ public class Controller implements Node {
     public synchronized void sendShardStorageLocations (TCPConnection conn, Message msg) {
         //9 because we have 9 shards to be dispersed
         try {
-            List<List<String>> shardStorageServers = ChunkServerRanker.rankChunkServersForChunks(9, chunkServerAvailableSpaceMap,
-                    FaultToleranceMode.RS, (String) msg.getPayload());
-
+            List<List<String>> shardStorageServers = new ArrayList<>();
+            if (!shardStorageOnlyServers.isEmpty()) {
+                for (int i = 0; i < 9; i++) {
+                    shardStorageServers.add(shardStorageOnlyServers);
+                }
+            }
+            else {
+                shardStorageServers = ChunkServerRanker.rankChunkServersForChunks(9, chunkServerAvailableSpaceMap,
+                        FaultToleranceMode.RS, (String) msg.getPayload());
+            }
             /***
              * Fill in the local chunk storage map
              * In the future, when client requests download for a file
@@ -463,7 +501,6 @@ public class Controller implements Node {
         catch (Exception ex) {
             ex.printStackTrace();
         }
-
     }
 
 

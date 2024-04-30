@@ -74,14 +74,20 @@ public class ChunkServer implements Node {
     private CountDownLatch shardsReceived;
 
     public static void main(String[] args) {
-        //REED SOLOMON RECOVERY MODE
+        //REED SOLOMON RECOVERY MODE. Debug = args=4
         if (args.length == 4) {
             FAULT_TOLERANCE_MODE = args[2];
             //assuming Reed-Solomon mode is the only mode specified via cmd line
             FAULT_TOLERANCE_MODE = FaultToleranceMode.RS.getMode();
         }
-        //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
-         try (Socket socketToController = new Socket("localhost", 12345);
+        //PROD - MODE
+        if (args.length == 3) {
+            FAULT_TOLERANCE_MODE = args[2];
+            //assuming Reed-Solomon mode is the only mode specified via cmd line
+            FAULT_TOLERANCE_MODE = FaultToleranceMode.RS.getMode();
+        }
+        try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
+         //try (Socket socketToController = new Socket("localhost", 12345);
              ServerSocket chunkServerSocket = new ServerSocket(0);
         ) {
             ChunkServer chunkServer = new ChunkServer();
@@ -361,7 +367,9 @@ public class ChunkServer implements Node {
                  * Let's wait for the controller to reply with list of pure replicas
                  */
                 try {
+                    System.out.println("Waiting for controller to reply with replica locations for repair");
                     waitForNodeInfoAboutPureReplicas.await();
+                    System.out.println("Controller replied with replica locations");
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
