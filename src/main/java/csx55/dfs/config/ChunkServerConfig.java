@@ -3,7 +3,9 @@ package csx55.dfs.config;
 import java.util.concurrent.TimeUnit;
 
 public class ChunkServerConfig {
-    public static final String CHUNK_STORAGE_ROOT_DIRECTORY = "/tmp/ytamraka/demo1";
+    public static final String CHUNK_STORAGE_ROOT_DIRECTORY = "/tmp/ytamraka/demo2";
+
+    //public static final String CHUNK_STORAGE_ROOT_DIRECTORY = "tmp";
 
     public static final int MAX_SLICE_SIZE = 8 * 1024; // 8KB slices
 
