@@ -11,11 +11,14 @@ public class TCPSenderThread implements Runnable {
 
     private LinkedBlockingQueue<Object> queue;
 
+    private Socket socket;
+
 
     public TCPSenderThread(Socket socket) throws IOException {
         final int defaultQueueSize = 1000;
         this.queue = new LinkedBlockingQueue<>( defaultQueueSize );
         this.dout = new ObjectOutputStream( socket.getOutputStream() );
+        this.socket = socket;
     }
 
     public void sendData(final Object obj) throws InterruptedException {
@@ -36,8 +39,8 @@ public class TCPSenderThread implements Runnable {
                     dout.flush();
                     dout.reset();
                 } catch (IOException e) {
-                    System.out.println("Connection closed");
-                    //e.printStackTrace();
+                    System.out.println("Connection closed to "+ socket.getInetAddress() + ":" + socket.getPort());
+                    e.printStackTrace();
                 }
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);

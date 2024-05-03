@@ -39,8 +39,8 @@ public class Client implements Node {
     private String fileDownloadPath;
 
     public static void main (String [] args) {
-        //try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
-         try (Socket socketToController = new Socket("localhost", 12345);
+        try (Socket socketToController = new Socket(args[0], Integer.parseInt(args[1]));
+         //try (Socket socketToController = new Socket("localhost", 12345);
              ServerSocket clientSocket = new ServerSocket(0);)
         {
              Client client = new Client();

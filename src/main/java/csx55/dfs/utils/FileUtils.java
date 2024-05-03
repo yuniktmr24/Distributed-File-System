@@ -55,7 +55,36 @@ public class FileUtils {
         List<Path> fileList = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(rootPath)) {
             fileList = walk.filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT))
+                    .filter(path -> path.getFileName().toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT)
+                    && !path.getFileName().toString().contains(ChunkServerConfig.SHARD_EXT))
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            System.err.println("Error reading files: " + e.getMessage());
+        }
+        return fileList;
+    }
+
+    public static List <Path> getShardsWithExtension(String ip, Integer port) {
+        return getShardsWithExtension(ip + "-" + port);
+    }
+
+    public static List<Path> getShardsWithExtension(String pathAddendum) {
+        Path rootPath = Paths.get(ChunkServerConfig.CHUNK_STORAGE_ROOT_DIRECTORY + "/" +
+                 (pathAddendum.isEmpty() ? "" : "/" + pathAddendum) + "/" + ChunkServerConfig.SHARD_STORAGE_BASE);
+        System.out.println("Searching for shards in "+ rootPath.toString());
+        if (!Files.exists(rootPath)) {
+            try {
+                Files.createDirectories(rootPath);
+                System.out.println("Directory created: " + rootPath);
+            } catch (IOException e) {
+                System.err.println("Failed to create directory: " + e.getMessage());
+                return new ArrayList<>(); // Return empty list if unable to create directory
+            }
+        }
+        List<Path> fileList = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(rootPath)) {
+            fileList = walk.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().contains(ChunkServerConfig.SHARD_EXT))
                     .collect(Collectors.toList());
         } catch (IOException e) {
             System.err.println("Error reading files: " + e.getMessage());
@@ -81,6 +110,26 @@ public class FileUtils {
             byte[] data = chunkPayload.getChunkWrapper().getData();  // Get the byte array data
 
             Path destinationPath = Paths.get(fileStorageDirectory, chunkName);  // Combine and resolve the path
+
+            // Ensure directories exist or create them
+            Files.createDirectories(destinationPath.getParent());
+
+            // Write the byte array to the file
+            Files.write(destinationPath, data);
+
+            System.out.println("File written successfully to: " + destinationPath);
+        } catch (IOException e) {
+            System.err.println("Failed to write the file: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public static void storeShard(ShardWrapper shard, String fileStorageDirectory) {
+        try {
+            String shardName = shard.getShardName();  // Get the full path and filename
+            byte[] data = shard.getData();  // Get the byte array data
+
+            Path destinationPath = Paths.get(fileStorageDirectory, shardName);  // Combine and resolve the path
 
             // Ensure directories exist or create them
             Files.createDirectories(destinationPath.getParent());

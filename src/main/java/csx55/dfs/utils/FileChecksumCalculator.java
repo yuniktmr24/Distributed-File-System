@@ -77,16 +77,17 @@ public class FileChecksumCalculator {
         try {
             List<Path> files = Files.walk(rootDirectory)
                     .filter(Files::isRegularFile)
-                    .filter(path -> path.toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT))
+                    .filter(path -> path.toString().contains(ChunkServerConfig.CHUNK_STORAGE_EXT)
+                            && !path.getFileName().toString().contains(ChunkServerConfig.SHARD_EXT))
                     .collect(Collectors.toList());
 
             for (Path file : files) {
                 byte[] fileData = Files.readAllBytes(file);
                 List<String> checksums = computeChecksums(fileData);
                 checksumMap.put(String.valueOf(file).replaceFirst(storageRoot, ""), checksums);
-                System.out.println("Checksums for file: " + file.getFileName());
+                //System.out.println("Checksums for file: " + file.getFileName());
                 for (int i = 0; i < checksums.size(); i++) {
-                    System.out.println(" Slice " + (i + 1) + ": " + checksums.get(i));
+                    //System.out.println(" Slice " + (i + 1) + ": " + checksums.get(i));
                 }
             }
         } catch (IOException e) {

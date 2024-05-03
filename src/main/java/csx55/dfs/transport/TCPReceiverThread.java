@@ -8,6 +8,7 @@ import csx55.dfs.domain.Node;
 import csx55.dfs.replication.ChunkServer;
 import csx55.dfs.replication.Client;
 import csx55.dfs.utils.ChunkWrapper;
+import csx55.dfs.utils.ShardWrapper;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -77,6 +78,9 @@ public class TCPReceiverThread implements Runnable {
                         else if (msg.getProtocol() == Protocol.PRISTINE_CHUNK_LOCATION_REQUEST) {
                             controller.sendPristineReplicaLocation(connection, msg);
                         }
+                        else if (msg.getProtocol() == Protocol.SHARD_STORAGE_RANKING_REQUEST) {
+                            controller.sendShardStorageLocations(connection, msg);
+                        }
                     }
                 }
                 /***
@@ -91,7 +95,13 @@ public class TCPReceiverThread implements Runnable {
                         chunkServer.receiveChunks((ChunkPayload) object);
                     }
                     else if (object instanceof ChunkWrapper) {
-                        chunkServer.receiveChunksAsWrapper((ChunkWrapper) object);
+                         if (object instanceof ShardWrapper) {
+                            ShardWrapper shard = (ShardWrapper) object;
+                            chunkServer.persistShard(connection, shard);
+                        }
+                        else {
+                             chunkServer.receiveChunksAsWrapper((ChunkWrapper) object);
+                         }
                     }
                     else if (object instanceof Message) {
                         Message msg = (Message) object;
@@ -106,6 +116,16 @@ public class TCPReceiverThread implements Runnable {
                             //for replica
                             chunkServer.recoverReplica(msg);
                         }
+                        else if (msg.getProtocol() == Protocol.SHARD_STORAGE_RANKING_RESPONSE) {
+                            chunkServer.receiveShardStorageLocations(connection, msg);
+                        }
+                        else if (msg.getProtocol() == Protocol.RECOVER_SHARDS) {
+                            chunkServer.recoverShards(connection, msg);
+                        }
+                        else if (msg.getProtocol() == Protocol.REQUEST_SHARD) {
+                            chunkServer.sendShards(connection, msg);
+                        }
+
                     }
                     /***
                      * The chunkserver with corrupted slice has requested us for the

@@ -8,6 +8,8 @@ public class MajorHeartBeat extends HeartBeat implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private List<String> allChunkFiles = new ArrayList<>();
+
+    private List<String> allShards = new ArrayList<>();
     /***
      * @serialField info about the metadata for all files stored in a given chunkserver
      */
@@ -22,5 +24,13 @@ public class MajorHeartBeat extends HeartBeat implements Serializable {
 
     public void setAllChunkFiles(List<String> allChunkFiles) {
         this.allChunkFiles = allChunkFiles;
+    }
+
+    public List<String> getAllShards() {
+        return allShards;
+    }
+
+    public void setAllShards(List<String> allShards) {
+        this.allShards = allShards;
     }
 }

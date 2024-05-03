@@ -17,5 +17,17 @@ public interface Protocol {
 
     //used along with a list of replica servers so that the target can acquire the replica
     final int RECOVER_REPLICA = 8;
+
+    /***
+     * Reed-Solomon protocols
+     */
+
+    final int SHARD_STORAGE_RANKING_REQUEST = 9;
+
+    final int SHARD_STORAGE_RANKING_RESPONSE = 10;
+
+    final int RECOVER_SHARDS = 11;
+
+    final int REQUEST_SHARD = 12;
 }
 
